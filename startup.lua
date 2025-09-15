@@ -1,4 +1,4 @@
--- ATM10 Draconic Reactor Controller — startup.lua (final con control de saturación)
+-- ATM10 Draconic Reactor Controller — startup.lua (con drenado controlado)
 -- Incluye autodetección, HUD completo, control PI, failsafes
 -- y setup visual con puntero para elegir IN/OUT gates.
 -- Autor: Fabian + ChatGPT
@@ -213,12 +213,14 @@ local function controlTick(info, dt)
     S.iErrOut=clamp(S.iErrOut+err*dt,-1000,1000)
     S.setOut=clamp(S.setOut+(CFG.OUT_KP*err+CFG.OUT_KI*S.iErrOut)*dt,CFG.OUT_MIN,CFG.OUT_MAX)
 
-    -- === Control extra por saturación alta ===
-    local SAT_HIGH = 95.0  -- drenar fuerte al 95%
-    local SAT_LOW  = 85.0  -- volver a control normal al 85%
+    -- === Control extra por saturación alta con drenado controlado ===
+    local SAT_HIGH = 90.0  -- empezar a drenar si supera 90%
+    local SAT_LOW  = 80.0  -- volver a control normal al 80%
+
     if info.satP >= SAT_HIGH then
-      S.setOut = CFG.OUT_MAX -- abrir salida a tope
-      S.action = S.action .. " | Descargando SAT"
+      -- aumentar salida de forma controlada (x1.5) sin pasarse del 70% de OUT_MAX
+      S.setOut = clamp(S.setOut * 1.5, CFG.OUT_MIN, CFG.OUT_MAX * 0.7)
+      S.action = S.action .. " | Drenando controlado"
     elseif info.satP <= SAT_LOW then
       -- normal
     end
