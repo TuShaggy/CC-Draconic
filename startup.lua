@@ -49,8 +49,8 @@ local S = {
   satMA=nil, fieldMA=nil, genMA=nil, tempMA=nil,
   satPrev=nil, lastT=os.clock(), dSat=0,
   action="Boot",
-  view="DASH",  -- "DASH" o "CTRL"
-  histSAT={}, histField={},
+  view="DASH",
+  histSAT={}, histField={}, histTemp={},
 }
 
 -- ========= Persistencia =========
@@ -129,32 +129,35 @@ local function controlTick(info, dt)
   -- Guardar historial
   table.insert(S.histSAT, S.satMA); if #S.histSAT>CFG.HIST_SIZE then table.remove(S.histSAT,1) end
   table.insert(S.histField, S.fieldMA); if #S.histField>CFG.HIST_SIZE then table.remove(S.histField,1) end
-
-  -- (La lógica de control de modos la mantengo igual que antes)
+  table.insert(S.histTemp, S.tempMA); if #S.histTemp>CFG.HIST_SIZE then table.remove(S.histTemp,1) end
 end
 
 -- ========= HUD =========
-local function drawBar(mon,x,y,w,h,pct,color)
-  pct=math.max(0,math.min(100,pct))
-  local fill=math.floor((pct/100)*w)
-  for j=0,h-1 do
-    for i=0,w-1 do
-      mon.setCursorPos(x+i,y+j)
-      if i<fill then mon.setBackgroundColor(color or colors.green)
-      else mon.setBackgroundColor(colors.gray) end
-      mon.write(" ")
-    end
-  end
-  mon.setBackgroundColor(colors.black)
-end
-
-local function drawGraph(mon,x,y,w,h,hist,color)
-  local maxv=100
+local function drawGraph(mon,x,y,w,h,hist,maxv,typeName)
   for i=1,w do
     local idx=#hist-w+i
     if idx>0 then
       local v=hist[idx] or 0
-      local filled=math.floor((v/maxv)*h)
+      local percent
+      if maxv then percent=(v/maxv)*100 else percent=v end
+
+      -- color dinámico según tipo
+      local color=colors.white
+      if typeName=="SAT" then
+        if percent>95 then color=colors.red
+        elseif percent>85 then color=colors.yellow
+        else color=colors.blue end
+      elseif typeName=="FIELD" then
+        if percent<30 then color=colors.red
+        elseif percent<50 then color=colors.yellow
+        else color=colors.cyan end
+      elseif typeName=="TEMP" then
+        if v>7000 then color=colors.red
+        elseif v>5000 then color=colors.yellow
+        else color=colors.green end
+      end
+
+      local filled=math.floor((percent/100)*h)
       for j=0,h-1 do
         mon.setCursorPos(x+i-1,y+h-j-1)
         if j<filled then mon.setBackgroundColor(color)
@@ -166,39 +169,35 @@ local function drawGraph(mon,x,y,w,h,hist,color)
   mon.setBackgroundColor(colors.black)
 end
 
-local function drawDash(info)
-  local mon=S.mon; mon.setTextScale(1); f.clear(mon)
-  local mx,my=mon.getSize(); local barW=mx-8
-  mon.setCursorPos(2,1); mon.write("Reactor ("..(S.rxName or "?")..")")
-  mon.setCursorPos(mx-10,1); mon.write("[CONTROLS]")
-  mon.setCursorPos(2,3); mon.write(("SAT: %.1f%%"):format(S.satMA or info.satP))
-  drawBar(mon,2,4,barW,2,S.satMA or info.satP,colors.blue)
-  mon.setCursorPos(2,7); mon.write(("Field: %.1f%%"):format(S.fieldMA or info.fieldP))
-  drawBar(mon,2,8,barW,2,S.fieldMA or info.fieldP,colors.cyan)
-  mon.setCursorPos(2,11); mon.write(("Gen: %s RF/t"):format(f.format_int(info.gen)))
-  mon.setCursorPos(2,12); mon.write(("Temp: %d C"):format(info.temp))
-  mon.setCursorPos(2,my); mon.write(S.action)
-end
-
 local function drawCtrl(info)
   local mon=S.mon; mon.setTextScale(1); f.clear(mon)
   local mx,my=mon.getSize()
   mon.setCursorPos(2,1); mon.write("[BACK]")
-  mon.setCursorPos(mx//2-3,1); mon.write("MODES")
-  -- botones
+  mon.setCursorPos(math.floor(mx/2)-3,1); mon.write("MODES")
   local modes={"SAT","MAXGEN","ECO","TURBO","PROTECT"}
   for i,m in ipairs(modes) do
-    mon.setCursorPos(4,2+i); if m==S.modeOut then
+    mon.setCursorPos(4,2+i)
+    if m==S.modeOut then
       mon.setBackgroundColor(colors.orange); mon.setTextColor(colors.black)
     else mon.setBackgroundColor(colors.gray); mon.setTextColor(colors.white) end
     mon.write(" "..m.." ")
     mon.setBackgroundColor(colors.black); mon.setTextColor(colors.white)
   end
-  -- gráficas
+  -- gráficas con colores dinámicos
+  mon.setCursorPos(2,10); mon.write("SAT history")
+  drawGraph(mon,2,11,mx-4,4,S.histSAT,100,"SAT")
+  mon.setCursorPos(2,16); mon.write("Field history")
+  drawGraph(mon,2,17,mx-4,4,S.histField,100,"FIELD")
+  mon.setCursorPos(2,22); mon.write("Temp history")
+  drawGraph(mon,2,23,mx-4,4,S.histTemp,8000,"TEMP")
+end
+
   mon.setCursorPos(2,10); mon.write("SAT history")
   drawGraph(mon,2,11,mx-4,4,S.histSAT,colors.blue)
   mon.setCursorPos(2,16); mon.write("Field history")
   drawGraph(mon,2,17,mx-4,4,S.histField,colors.cyan)
+  mon.setCursorPos(2,22); mon.write("Temp history")
+  drawGraph(mon,2,23,mx-4,4,S.histTemp,colors.red,8000)
 end
 
 local function draw(info)
