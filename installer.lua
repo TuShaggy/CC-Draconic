@@ -1,7 +1,6 @@
--- Optional self-updater. Replace RAW_BASE with your repo raw URL.
--- Example: https://raw.githubusercontent.com/TuShaggy/posta/main
 
-local RAW_BASE = "https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main"
+
+local RAW_BASE = "https://raw.githubusercontent.com/TuShaggy/posta/main"
 local FILES = { "startup.lua", "lib/f.lua" }
 
 local function fetch(url)
@@ -10,8 +9,8 @@ local function fetch(url)
 end
 
 local function save(path, data)
-  fs.makeDir(string.match(path, "(.+)/[^
-]+$") or ".")
+  local dir = fs.getDir(path)
+  if dir ~= "" then fs.makeDir(dir) end
   local f = fs.open(path, "w"); f.write(data); f.close()
 end
 
