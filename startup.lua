@@ -1,5 +1,5 @@
 local f = dofile("lib/f.lua")
-end
+
 -- OUT gate manual adjustments
 local yBtn = my-1
 if inRect(2,yBtn,"<<<") then S.setOut = S.setOut - 100000; S.autoOut = false end
