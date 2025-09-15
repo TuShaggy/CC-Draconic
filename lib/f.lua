@@ -1,3 +1,4 @@
+-- lib/f.lua — helpers de UI para monitor CC:Tweaked
 local f = {}
 
 local function drawPad(mon, x, y, label, fg, bg)
