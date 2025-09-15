@@ -37,11 +37,9 @@ local CFG = {
   -- Control OUT (PI cuando aplica)
   OUT_KP = 60000, OUT_KI = 15000,
 
-  -- Límites de flujos
-  IN_MIN = 0, IN_MAX = 3_000_000,
-  OUT_MIN = 0, OUT_MAX = 10_000_000,
-
-  CHARGE_FLOW = 900_000, -- para recuperar campo
+  IN_MIN = 0, IN_MAX = 3000000,
+OUT_MIN = 0, OUT_MAX = 10000000,
+CHARGE_FLOW = 900000,
 
   -- UI / tasa de control
   UI_TICK = 0.25,
