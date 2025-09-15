@@ -1,5 +1,5 @@
--- ATM10 Draconic Reactor Controller — startup.lua
--- Incluye autodetección, HUD con barras, control PI y failsafes
+-- ATM10 Draconic Reactor Controller — startup.lua (Dual Mode)
+-- SAT mode (PI control) / MAXGEN mode (band control)
 -- Autor: Fabian + ChatGPT
 
 -- ===== Helpers =====
@@ -26,13 +26,13 @@ local CFG = {
   TEMP_MAX = 8000,
   TEMP_SAFE = 3000,
   IN_KP = 120000, IN_KI = 20000,
-  OUT_KP = 60000, OUT_KI = 15000,   -- suavizado: menor agresividad
+  OUT_KP = 60000, OUT_KI = 15000,
   IN_MIN = 0, IN_MAX = 3000000,
   OUT_MIN = 0, OUT_MAX = 10000000,
   CHARGE_FLOW = 900000,
   UI_TICK = 0.25,
   DB_FIELD = 1.0,
-  DB_SAT = 5.0,     -- histéresis más ancha alrededor del 80%
+  DB_SAT = 5.0,
   DB_GEN = 0.02,
   IN_SLEW_PER_SEC  = 200000,
   OUT_SLEW_PER_SEC = 300000,
@@ -48,7 +48,7 @@ local S = {
   lastT=os.clock(),
   action="Boot",
   alarm=false,
-  modeOut="SAT",
+  modeOut="SAT",   -- SAT | MAXGEN
   satMA=nil, fieldMA=nil, genMA=nil,
 }
 
@@ -105,84 +105,6 @@ local function wrapFluxSetter(p)
   api.raw=p; return api
 end
 
--- ========= Setup visual =========
-local function setupWizard()
-  local reactor,monitor,gates=detect()
-  if not reactor then error("No se detecta reactor (draconic_reactor_*)") end
-  if not monitor then error("No se detecta monitor (monitor_*)") end
-  if #gates<2 then error("No se detectan al menos 2 flow_gate_*") end
-
-  local sel={rx=reactor, mon=monitor, inIdx=1, outIdx=2}
-  local monP=peripheral.wrap(monitor)
-  local monW,monH=monP.getSize()
-
-  local function draw()
-    f.clear(monP); monP.setTextScale(0.5)
-    monP.setCursorPos(2,2); monP.write("SETUP VISUAL — Selecciona periféricos")
-
-    monP.setCursorPos(2,4); monP.write("Reactor: "..(sel.rx or "?"))
-    monP.setCursorPos(2,6); monP.write("Monitor: "..(sel.mon or "?"))
-
-    monP.setCursorPos(2,8); monP.write("Input Gate (IN):")
-    for i,n in ipairs(gates) do
-      monP.setCursorPos(4,9+i)
-      if i==sel.inIdx then
-        monP.setBackgroundColor(colors.blue); monP.write("> "..n.." <"); monP.setBackgroundColor(colors.black)
-      else monP.write("  "..n) end
-    end
-
-    monP.setCursorPos(2,12+#gates); monP.write("Output Gate (OUT):")
-    for i,n in ipairs(gates) do
-      monP.setCursorPos(4,13+#gates+i)
-      if i==sel.outIdx then
-        monP.setBackgroundColor(colors.blue); monP.write("> "..n.." <"); monP.setBackgroundColor(colors.black)
-      else monP.write("  "..n) end
-    end
-
-    f.button(monP,2,monH-4,"Autocalibrar",colors.orange)
-    f.button(monP,2,monH-2,"Guardar & Iniciar",colors.green)
-    f.button(monP,monW-10,monH-2,"Cancelar",colors.red)
-  end
-
-  draw()
-  while true do
-    local _,_,x,y=os.pullEvent("monitor_touch")
-    for i,_ in ipairs(gates) do
-      if y==9+i then sel.inIdx=i; draw() end
-      if y==13+#gates+i then sel.outIdx=i; draw() end
-    end
-    if y==monH-4 and x>=2 and x<=17 and #gates==2 then
-      sel.inIdx=1; sel.outIdx=2; draw()
-    end
-    if y==monH-2 and x>=2 and x<=17 then
-      if sel.inIdx==sel.outIdx then
-        monP.setCursorPos(2,monH-1); monP.write("IN y OUT no pueden ser iguales")
-      else
-        local map={reactor=sel.rx, monitor=sel.mon, in_gate=gates[sel.inIdx], out_gate=gates[sel.outIdx]}
-        saveTbl(CFG.CFG_FILE,map)
-        return map
-      end
-    end
-    if y==monH-2 and x>=monW-10 then error("Setup cancelado") end
-  end
-end
-
--- ========= Discover =========
-local function discover()
-  local map=loadTbl(CFG.CFG_FILE)
-  local rx,mon,gates=detect()
-  if not rx or not mon or #gates<2 then return setupWizard() end
-  if not map then
-    if #gates==2 then
-      map={reactor=rx, monitor=mon, in_gate=gates[1], out_gate=gates[2]}
-      saveTbl(CFG.CFG_FILE,map)
-    else
-      map=setupWizard()
-    end
-  end
-  return map
-end
-
 -- ========= Control =========
 local function clamp(v,lo,hi) if v<lo then return lo elseif v>hi then return hi else return v end end
 local function slew(prev, desired, rate_per_sec, dt)
@@ -194,10 +116,10 @@ local function slew(prev, desired, rate_per_sec, dt)
 end
 
 local function controlTick(info, dt)
-  if not info then S.action = "No reactor info"; return end
+  if not info then S.action="No reactor info"; return end
 
-  -- Filtros EMA
-  local a = 0.25
+  -- EMA filters
+  local a=0.25
   S.satMA   = S.satMA   and (S.satMA   + a*(info.satP - S.satMA))     or info.satP
   S.fieldMA = S.fieldMA and (S.fieldMA + a*(info.fieldP - S.fieldMA)) or info.fieldP
   S.genMA   = S.genMA   and (S.genMA   + a*(info.gen   - S.genMA))     or info.gen
@@ -208,63 +130,54 @@ local function controlTick(info, dt)
 
   -- Failsafes
   if field <= CFG.FIELD_LOW_TRIP then
-    S.action="EMERG: Field low"; S.inp.set(CFG.CHARGE_FLOW); S.setOut = CFG.OUT_MIN; S.out.set(S.setOut); return
+    S.action="EMERG: Field low"; S.inp.set(CFG.CHARGE_FLOW); S.setOut=CFG.OUT_MIN; S.out.set(S.setOut); return
   end
   if info.temp >= CFG.TEMP_MAX then
-    S.action="EMERG: Temp high"; S.setOut = CFG.OUT_MIN; S.out.set(S.setOut); return
+    S.action="EMERG: Temp high"; S.setOut=CFG.OUT_MIN; S.out.set(S.setOut); return
   end
 
-  -- Control IN
+  -- IN control
   if S.autoIn then
     local err = CFG.TARGET_FIELD - field
-    if math.abs(err) <= CFG.DB_FIELD then err = 0 end
-    S.iErrIn = clamp(S.iErrIn + err*dt, -1000, 1000)
-    local desiredIn = clamp(S.setIn + (CFG.IN_KP*err + CFG.IN_KI*S.iErrIn)*dt, CFG.IN_MIN, CFG.IN_MAX)
-    S.setIn = slew(S.setIn, desiredIn, CFG.IN_SLEW_PER_SEC, dt)
+    if math.abs(err)<=CFG.DB_FIELD then err=0 end
+    S.iErrIn=clamp(S.iErrIn+err*dt,-1000,1000)
+    local desiredIn=clamp(S.setIn+(CFG.IN_KP*err+CFG.IN_KI*S.iErrIn)*dt,CFG.IN_MIN,CFG.IN_MAX)
+    S.setIn=slew(S.setIn,desiredIn,CFG.IN_SLEW_PER_SEC,dt)
     S.inp.set(S.setIn)
   end
 
-  -- Control OUT
+  -- OUT control
   if S.autoOut then
-    local desiredOut
-    if S.modeOut == "SAT" then
+    local desiredOut=S.setOut
+    if S.modeOut=="SAT" then
       local err = sat - CFG.TARGET_SAT
-      if math.abs(CFG.TARGET_SAT - sat) <= CFG.DB_SAT then err = 0 end
-      S.iErrOut = clamp(S.iErrOut + err*dt, -1000, 1000)
-      desiredOut = clamp(S.setOut + (CFG.OUT_KP*err + CFG.OUT_KI*S.iErrOut)*dt, CFG.OUT_MIN, CFG.OUT_MAX)
-
-      if sat >= 90 then
-        local exceso = sat - CFG.TARGET_SAT
-        desiredOut = clamp(desiredOut + exceso * 50000, CFG.OUT_MIN, CFG.OUT_MAX*0.8)
-        S.action = S.action .. " | Drenando suave"
+      if math.abs(CFG.TARGET_SAT - sat) <= CFG.DB_SAT then err=0 end
+      S.iErrOut=clamp(S.iErrOut+err*dt,-1000,1000)
+      desiredOut=clamp(S.setOut+(CFG.OUT_KP*err+CFG.OUT_KI*S.iErrOut)*dt,CFG.OUT_MIN,CFG.OUT_MAX)
+    elseif S.modeOut=="MAXGEN" then
+      if sat > 95 then
+        desiredOut=CFG.OUT_MAX*0.8
+      elseif sat < 75 then
+        desiredOut=CFG.OUT_MIN
+      else
+        desiredOut=CFG.OUT_MAX*0.7
       end
-      if sat <= 50 then
-        desiredOut = CFG.OUT_MIN
-        S.action = S.action .. " | SAT baja"
-      end
-    else
-      local target = math.max(1, CFG.TARGET_GEN_RFPT)
-      local e = (CFG.TARGET_GEN_RFPT - gen) / target * 100
-      if math.abs(e) <= CFG.DB_GEN*100 then e = 0 end
-      S.iErrOut = clamp(S.iErrOut + e*dt, -1000, 1000)
-      desiredOut = clamp(S.setOut + (CFG.OUT_KP*e + CFG.OUT_KI*S.iErrOut)*dt, CFG.OUT_MIN, CFG.OUT_MAX)
     end
-
-    if info.temp > 6500 then desiredOut = math.min(desiredOut, CFG.OUT_MAX * 0.6) end
-    S.setOut = slew(S.setOut, desiredOut, CFG.OUT_SLEW_PER_SEC, dt)
+    if info.temp > 6500 then desiredOut=math.min(desiredOut,CFG.OUT_MAX*0.6) end
+    S.setOut=slew(S.setOut,desiredOut,CFG.OUT_SLEW_PER_SEC,dt)
     S.out.set(S.setOut)
   end
 
-  S.action = "IN="..f.si(S.setIn).." OUT="..f.si(S.setOut)
+  S.action="IN="..f.si(S.setIn).." OUT="..f.si(S.setOut).." | MODE="..S.modeOut
 end
 
 -- ========= HUD =========
-local function drawBar(mon, x, y, w, pct, color)
-  pct = math.max(0, math.min(100, pct))
-  local fill = math.floor((pct/100) * w)
+local function drawBar(mon,x,y,w,pct,color)
+  pct=math.max(0,math.min(100,pct))
+  local fill=math.floor((pct/100)*w)
   for i=0,w-1 do
-    mon.setCursorPos(x+i, y)
-    if i < fill then
+    mon.setCursorPos(x+i,y)
+    if i<fill then
       mon.setBackgroundColor(color or colors.green)
     else
       mon.setBackgroundColor(colors.gray)
@@ -274,29 +187,53 @@ local function drawBar(mon, x, y, w, pct, color)
   mon.setBackgroundColor(colors.black)
 end
 
+local function drawMarker(mon,x,y,w,pct)
+  local pos=x+math.floor((math.max(0,math.min(100,pct))/100)*w)
+  if pos>x+w-1 then pos=x+w-1 end
+  mon.setCursorPos(pos,y)
+  mon.setBackgroundColor(colors.black)
+  mon.setTextColor(colors.white)
+  mon.write("|")
+  mon.setTextColor(colors.white)
+end
+
 local function draw(info)
   local mon=S.mon
   mon.setTextScale(0.5)
   f.clear(mon)
-  local mx,_ = mon.getSize()
-  local barW = math.max(20, math.min(50, mx - 12))
+  local mx,_=mon.getSize()
+  local barW=math.max(20,math.min(50,mx-12))
 
   f.textLR(mon,2,2,"Reactor ("..(S.rxName or "?")..")",string.upper(info.status),colors.white,colors.lime)
   f.textLR(mon,2,4,"Gen",f.format_int(info.gen).." RF/t",colors.white,colors.white)
   f.textLR(mon,2,6,"Temp",f.format_int(info.temp).." C",colors.white,colors.red)
 
   mon.setCursorPos(2,8); mon.write("SAT: "..string.format("%.1f%%",S.satMA or info.satP))
-  drawBar(mon, 10, 8, barW, S.satMA or info.satP, colors.blue)
+  drawBar(mon,10,8,barW,S.satMA or info.satP,colors.blue)
+  drawMarker(mon,10,8,barW,80)
+  drawMarker(mon,10,8,barW,95)
 
   mon.setCursorPos(2,10); mon.write("Field: "..string.format("%.1f%%",S.fieldMA or info.fieldP))
-  drawBar(mon, 10, 10, barW, S.fieldMA or info.fieldP, colors.cyan)
+  drawBar(mon,10,10,barW,S.fieldMA or info.fieldP,colors.cyan)
+  drawMarker(mon,10,10,barW,50)
 
   f.textLR(mon,2,12,"Action",S.action,colors.gray,colors.gray)
+
+  -- Botón de cambio de modo
+  f.button(mon,mx-12,2,"MODE:"..S.modeOut,colors.orange)
 end
 
 -- ========= Loops =========
 local function uiLoop()
-  while true do os.pullEvent("monitor_touch") end end
+  while true do
+    local _,_,x,y=os.pullEvent("monitor_touch")
+    local mx,_=S.mon.getSize()
+    if y==2 and x>=mx-12 then
+      if S.modeOut=="SAT" then S.modeOut="MAXGEN" else S.modeOut="SAT" end
+    end
+  end
+end
+
 local function tickLoop()
   while true do
     local now=os.clock(); local dt=now-S.lastT; S.lastT=now
@@ -305,7 +242,15 @@ local function tickLoop()
   end
 end
 
--- ========= MAIN =========
+-- ========= Discover + MAIN =========
+local function discover()
+  local map=loadTbl(CFG.CFG_FILE)
+  local rx,mon,gates=detect()
+  if not rx or not mon or #gates<2 then error("Setup simplificado pendiente") end
+  if not map then map={reactor=rx, monitor=mon, in_gate=gates[1], out_gate=gates[2]}; saveTbl(CFG.CFG_FILE,map) end
+  return map
+end
+
 local function main()
   local map=discover()
   S.rx=peripheral.wrap(map.reactor); S.rxName=map.reactor
