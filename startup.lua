@@ -121,29 +121,19 @@ local function setupWizard()
   local monP=peripheral.wrap(monitor)
   local monW,monH=monP.getSize()
 
-  local function draw(info)
-  local mon=S.mon
-  mon.setTextScale(0.5)
-  f.clear(mon)
-  local mx,my = mon.getSize()
-  local barW = math.max(20, math.min(50, mx - 12))
+  local function draw()
+    f.clear(monP); monP.setTextScale(0.5)
+    monP.setCursorPos(2,2); monP.write("SETUP VISUAL — Selecciona periféricos")
 
-  f.textLR(mon,2,2,"Reactor ("..(S.rxName or "?")..")",string.upper(info.status),colors.white,colors.lime)
-  f.textLR(mon,2,4,"Gen",f.format_int(info.gen).." RF/t",colors.white,colors.white)
-  f.textLR(mon,2,6,"Temp",f.format_int(info.temp).." C",colors.white,colors.red)
+    monP.setCursorPos(2,4); monP.write("Reactor: "..(sel.rx or "?"))
+    monP.setCursorPos(2,6); monP.write("Monitor: "..(sel.mon or "?"))
 
-  mon.setCursorPos(2,8)
-  mon.write("SAT: "..string.format("%.1f%%",S.satMA or info.satP))
-  drawBar(mon, 10, 8, barW, S.satMA or info.satP, colors.blue)
-  drawMarker(mon, 10, 8, barW, 80) -- marcador 80%
-
-  mon.setCursorPos(2,10)
-  mon.write("Field: "..string.format("%.1f%%",S.fieldMA or info.fieldP))
-  drawBar(mon, 10, 10, barW, S.fieldMA or info.fieldP, colors.cyan)
-  drawMarker(mon, 10, 10, barW, 50) -- marcador 50%
-
-  f.textLR(mon,2,12,"Action",S.action,colors.gray,colors.gray)
-end
+    monP.setCursorPos(2,8); monP.write("Input Gate (IN):")
+    for i,n in ipairs(gates) do
+      monP.setCursorPos(4,9+i)
+      if i==sel.inIdx then
+        monP.setBackgroundColor(colors.blue); monP.write("> "..n.." <"); monP.setBackgroundColor(colors.black)
+      else monP.write("  "..n) end
     end
 
     monP.setCursorPos(2,12+#gates); monP.write("Output Gate (OUT):")
@@ -154,6 +144,7 @@ end
       else monP.write("  "..n) end
     end
 
+    -- 👇 Asegúrate de que TODAS son f.button(...)
     f.button(monP,2,monH-4,"Autocalibrar",colors.orange)
     f.button(monP,2,monH-2,"Guardar & Iniciar",colors.green)
     f.button(monP,monW-10,monH-2,"Cancelar",colors.red)
@@ -161,7 +152,7 @@ end
 
   draw()
   while true do
-    local ev,_,x,y=os.pullEvent("monitor_touch")
+    local _,_,x,y=os.pullEvent("monitor_touch")
     for i,_ in ipairs(gates) do
       if y==9+i then sel.inIdx=i; draw() end
       if y==13+#gates+i then sel.outIdx=i; draw() end
@@ -174,13 +165,14 @@ end
         monP.setCursorPos(2,monH-1); monP.write("IN y OUT no pueden ser iguales")
       else
         local map={reactor=sel.rx, monitor=sel.mon, in_gate=gates[sel.inIdx], out_gate=gates[sel.outIdx]}
-        saveTbl(CFG.CFG_FILE,map)
+        local h=fs.open(CFG.CFG_FILE,"w"); h.write("return "..textutils.serialize(map)); h.close()
         return map
       end
     end
     if y==monH-2 and x>=monW-10 then error("Setup cancelado") end
   end
 end
+
 
 -- ========= Discover =========
 local function discover()
