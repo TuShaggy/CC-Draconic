@@ -1,5 +1,6 @@
--- ATM10 Draconic Reactor Controller — startup.lua
--- Incluye autodetección, HUD con barras, control PI y failsafes
+-- ATM10 Draconic Reactor Controller — startup.lua (con drenado controlado + failsafe SAT baja + barras HUD)
+-- Incluye autodetección, HUD completo, control PI, failsafes
+-- y setup visual con puntero para elegir IN/OUT gates.
 -- Autor: Fabian + ChatGPT
 
 -- ===== Helpers =====
@@ -26,15 +27,19 @@ local CFG = {
   TEMP_MAX = 8000,
   TEMP_SAFE = 3000,
   IN_KP = 120000, IN_KI = 20000,
-  OUT_KP = 120000, OUT_KI = 30000,
+  OUT_KP = 60000,  OUT_KI = 15000,   -- suavizado: menor agresividad
   IN_MIN = 0, IN_MAX = 3000000,
   OUT_MIN = 0, OUT_MAX = 10000000,
   CHARGE_FLOW = 900000,
   UI_TICK = 0.25,
   DB_FIELD = 1.0,
-  DB_SAT = 2.0,
+  DB_SAT = 5.0,     -- histéresis más ancha alrededor del 80%
   DB_GEN = 0.02,
+  -- Limitadores de rampa (slew rate), en RF/t por segundo
+  IN_SLEW_PER_SEC  = 200000,   -- máx cambio de IN por segundo
+  OUT_SLEW_PER_SEC = 300000,   -- máx cambio de OUT por segundo
 }
+
 
 -- ========= STATE =========
 local S = {
@@ -47,7 +52,10 @@ local S = {
   action="Boot",
   alarm=false,
   modeOut="SAT",
+  -- filtros EMA
+  satMA=nil, fieldMA=nil, genMA=nil,
 }
+
 
 -- ========= Persistencia =========
 local function saveTbl(path, tbl)
@@ -113,19 +121,29 @@ local function setupWizard()
   local monP=peripheral.wrap(monitor)
   local monW,monH=monP.getSize()
 
-  local function draw()
-    f.clear(monP); monP.setTextScale(0.5)
-    monP.setCursorPos(2,2); monP.write("SETUP VISUAL — Selecciona periféricos")
+  local function draw(info)
+  local mon=S.mon
+  mon.setTextScale(0.5)
+  f.clear(mon)
+  local mx,my = mon.getSize()
+  local barW = math.max(20, math.min(50, mx - 12))
 
-    monP.setCursorPos(2,4); monP.write("Reactor: "..(sel.rx or "?"))
-    monP.setCursorPos(2,6); monP.write("Monitor: "..(sel.mon or "?"))
+  f.textLR(mon,2,2,"Reactor ("..(S.rxName or "?")..")",string.upper(info.status),colors.white,colors.lime)
+  f.textLR(mon,2,4,"Gen",f.format_int(info.gen).." RF/t",colors.white,colors.white)
+  f.textLR(mon,2,6,"Temp",f.format_int(info.temp).." C",colors.white,colors.red)
 
-    monP.setCursorPos(2,8); monP.write("Input Gate (IN):")
-    for i,n in ipairs(gates) do
-      monP.setCursorPos(4,9+i)
-      if i==sel.inIdx then
-        monP.setBackgroundColor(colors.blue); monP.write("> "..n.." <"); monP.setBackgroundColor(colors.black)
-      else monP.write("  "..n) end
+  mon.setCursorPos(2,8)
+  mon.write("SAT: "..string.format("%.1f%%",S.satMA or info.satP))
+  drawBar(mon, 10, 8, barW, S.satMA or info.satP, colors.blue)
+  drawMarker(mon, 10, 8, barW, 80) -- marcador 80%
+
+  mon.setCursorPos(2,10)
+  mon.write("Field: "..string.format("%.1f%%",S.fieldMA or info.fieldP))
+  drawBar(mon, 10, 10, barW, S.fieldMA or info.fieldP, colors.cyan)
+  drawMarker(mon, 10, 10, barW, 50) -- marcador 50%
+
+  f.textLR(mon,2,12,"Action",S.action,colors.gray,colors.gray)
+end
     end
 
     monP.setCursorPos(2,12+#gates); monP.write("Output Gate (OUT):")
@@ -182,52 +200,87 @@ end
 
 -- ========= Control =========
 local function clamp(v,lo,hi) if v<lo then return lo elseif v>hi then return hi else return v end end
+local function slew(prev, desired, rate_per_sec, dt)
+  local maxDelta = (rate_per_sec or 1e9) * (dt or 0)
+  local delta = desired - prev
+  if delta > maxDelta then return prev + maxDelta end
+  if delta < -maxDelta then return prev - maxDelta end
+  return desired
+end
 
 local function controlTick(info, dt)
-  if info.fieldP <= CFG.FIELD_LOW_TRIP then
-    S.action="EMERG: Field low"; S.inp.set(CFG.CHARGE_FLOW); S.out.set(CFG.OUT_MIN)
-    return
+  -- watchdogs básicos
+  if not info then S.action = "No reactor info"; return end
+
+  -- aplicar filtros EMA a señales
+  local a = 0.25
+  S.satMA   = S.satMA   and (S.satMA   + a*(info.satP - S.satMA))     or info.satP
+  S.fieldMA = S.fieldMA and (S.fieldMA + a*(info.fieldP - S.fieldMA)) or info.fieldP
+  S.genMA   = S.genMA   and (S.genMA   + a*(info.gen   - S.genMA))     or info.gen
+
+  local sat   = S.satMA or info.satP
+  local field = S.fieldMA or info.fieldP
+  local gen   = S.genMA or info.gen
+
+  -- failsafes
+  if field <= CFG.FIELD_LOW_TRIP then
+    S.action="EMERG: Field low"; S.inp.set(CFG.CHARGE_FLOW); S.setOut = CFG.OUT_MIN; S.out.set(S.setOut); return
   end
   if info.temp >= CFG.TEMP_MAX then
-    S.action="EMERG: Temp high"; S.out.set(CFG.OUT_MIN); return
+    S.action="EMERG: Temp high"; S.setOut = CFG.OUT_MIN; S.out.set(S.setOut); return
   end
 
+  -- IN (campo)
   if S.autoIn then
-    local err = CFG.TARGET_FIELD - info.fieldP
-    if math.abs(err)<=CFG.DB_FIELD then err=0 end
-    S.iErrIn = clamp(S.iErrIn + err*dt,-1000,1000)
-    S.setIn = clamp(S.setIn + (CFG.IN_KP*err + CFG.IN_KI*S.iErrIn)*dt,CFG.IN_MIN,CFG.IN_MAX)
+    local err = CFG.TARGET_FIELD - field
+    if math.abs(err) <= CFG.DB_FIELD then err = 0 end
+    S.iErrIn = clamp(S.iErrIn + err*dt, -1000, 1000)
+    local desiredIn = clamp(S.setIn + (CFG.IN_KP*err + CFG.IN_KI*S.iErrIn)*dt, CFG.IN_MIN, CFG.IN_MAX)
+    S.setIn = slew(S.setIn, desiredIn, CFG.IN_SLEW_PER_SEC, dt)
     S.inp.set(S.setIn)
   end
 
+  -- OUT (saturación / generación)
   if S.autoOut then
-    local err
-    if S.modeOut=="SAT" then
-      err=CFG.TARGET_SAT-info.satP; if math.abs(err)<=CFG.DB_SAT then err=0 end
+    local desiredOut
+    if S.modeOut == "SAT" then
+      -- Nota: invertimos el signo del error para que sat>target => aumentar OUT
+      local err = sat - CFG.TARGET_SAT
+      if math.abs(CFG.TARGET_SAT - sat) <= CFG.DB_SAT then err = 0 end
+      S.iErrOut = clamp(S.iErrOut + err*dt, -1000, 1000)
+      desiredOut = clamp(S.setOut + (CFG.OUT_KP*err + CFG.OUT_KI*S.iErrOut)*dt, CFG.OUT_MIN, CFG.OUT_MAX)
+
+      -- drenado suave si muy alto
+      if sat >= 90 then
+        local exceso = sat - CFG.TARGET_SAT
+        desiredOut = clamp(desiredOut + exceso * 50000, CFG.OUT_MIN, CFG.OUT_MAX*0.8)
+        S.action = S.action .. " | Drenando suave"
+      end
+
+      -- proteger si muy bajo
+      if sat <= 50 then
+        desiredOut = CFG.OUT_MIN
+        S.action = S.action .. " | SAT baja"
+      end
+
     else
-      local e=(CFG.TARGET_GEN_RFPT-info.gen)/CFG.TARGET_GEN_RFPT*100
-      if math.abs(e)<=CFG.DB_GEN*100 then e=0 end
-      err=e
-    end
-    S.iErrOut=clamp(S.iErrOut+err*dt,-1000,1000)
-    S.setOut=clamp(S.setOut+(CFG.OUT_KP*err+CFG.OUT_KI*S.iErrOut)*dt,CFG.OUT_MIN,CFG.OUT_MAX)
-
-    -- Saturación alta → drenado controlado
-    if info.satP >= 90 then
-      S.setOut = clamp(S.setOut * 1.5, CFG.OUT_MIN, CFG.OUT_MAX * 0.7)
-      S.action = S.action .. " | Drenando controlado"
+      -- modo GEN: mantener generación objetivo
+      local target = math.max(1, CFG.TARGET_GEN_RFPT)
+      local e = (CFG.TARGET_GEN_RFPT - gen) / target * 100 -- % error
+      if math.abs(e) <= CFG.DB_GEN*100 then e = 0 end
+      S.iErrOut = clamp(S.iErrOut + e*dt, -1000, 1000)
+      desiredOut = clamp(S.setOut + (CFG.OUT_KP*e + CFG.OUT_KI*S.iErrOut)*dt, CFG.OUT_MIN, CFG.OUT_MAX)
     end
 
-    -- Saturación baja → proteger
-    if info.satP <= 50 then
-      S.setOut = CFG.OUT_MIN
-      S.action = S.action .. " | Protegiendo SAT baja"
-    end
+    -- limitar por temperatura alta
+    if info.temp > 6500 then desiredOut = math.min(desiredOut, CFG.OUT_MAX * 0.6) end
 
+    -- aplicar rampa
+    S.setOut = slew(S.setOut, desiredOut, CFG.OUT_SLEW_PER_SEC, dt)
     S.out.set(S.setOut)
   end
 
-  S.action="IN="..f.si(S.setIn).." OUT="..f.si(S.setOut)
+  S.action = "IN="..f.si(S.setIn).." OUT="..f.si(S.setOut)
 end
 
 -- ========= HUD con barras =========
@@ -246,20 +299,40 @@ local function drawBar(mon, x, y, w, pct, color)
   mon.setBackgroundColor(colors.black)
 end
 
+local function drawMarker(mon, x, y, w, pct)
+  local pos = x + math.floor((math.max(0, math.min(100, pct)) / 100) * w)
+  if pos > x + w - 1 then pos = x + w - 1 end
+  mon.setCursorPos(pos, y)
+  mon.setBackgroundColor(colors.black)
+  mon.setTextColor(colors.white)
+  mon.write("|")
+  mon.setTextColor(colors.white)
+end
+    mon.setBackgroundColor(colors.black)
+  else
+    -- Fallback ASCII para monitores no avanzados (B/W)
+    mon.setCursorPos(x,y)
+    local bar = string.rep("#", fill)..string.rep("-", w-fill)
+    mon.setTextColor(colors.white)
+    mon.write(bar)
+    mon.setTextColor(colors.white)
+  end
+end
+    mon.write(" ")
+  end
+  mon.setBackgroundColor(colors.black)
+end
+
 local function draw(info)
-  local mon=S.mon
-  mon.setTextScale(0.5)
-  f.clear(mon)
+  local mon=S.mon; mon.setTextScale(0.5); f.clear(mon)
   f.textLR(mon,2,2,"Reactor ("..(S.rxName or "?")..")",string.upper(info.status),colors.white,colors.lime)
   f.textLR(mon,2,4,"Gen",f.format_int(info.gen).." RF/t",colors.white,colors.white)
   f.textLR(mon,2,6,"Temp",f.format_int(info.temp).." C",colors.white,colors.red)
 
-  mon.setCursorPos(2,8)
-  mon.write("SAT: "..string.format("%.1f%%",info.satP))
+  mon.setCursorPos(2,8); mon.write("SAT: "..string.format("%.1f%%",info.satP))
   drawBar(mon, 10, 8, 30, info.satP, colors.blue)
 
-  mon.setCursorPos(2,10)
-  mon.write("Field: "..string.format("%.1f%%",info.fieldP))
+  mon.setCursorPos(2,10); mon.write("Field: "..string.format("%.1f%%",info.fieldP))
   drawBar(mon, 10, 10, 30, info.fieldP, colors.cyan)
 
   f.textLR(mon,2,12,"Action",S.action,colors.gray,colors.gray)
