@@ -1,6 +1,28 @@
--- ATM10 Draconic Reactor Controller — HUD + Animaciones + Sonidos
+-- ATM10 Draconic Reactor Controller — Auto-update + HUD nuevo + Setup
 
--- ===== Helpers =====
+-- ===== AUTO-UPDATE =====
+local REPO = "https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/"
+local FILES = {"startup.lua"}
+
+local function updateFromGit()
+  for _,file in ipairs(FILES) do
+    local url = REPO..file
+    local h = http.get(url)
+    if h then
+      local f = fs.open(file,"w")
+      f.write(h.readAll())
+      f.close()
+      h.close()
+      print("Actualizado "..file.." desde GitHub.")
+    else
+      print("No se pudo actualizar "..file.." (sin internet?)")
+    end
+  end
+end
+
+updateFromGit()
+
+-- ===== HELPERS =====
 local function load_f()
   if fs.exists("lib/f.lua") then
     local ok, mod = pcall(dofile, "lib/f.lua")
@@ -10,274 +32,127 @@ local function load_f()
     local ok = pcall(os.loadAPI, "lib/f")
     if ok and type(_G.f)=="table" then return _G.f end
   end
-  error("No se pudo cargar la librería 'f' (lib/f.lua')")
+  error("No se pudo cargar lib/f.lua")
 end
 local f = load_f()
 
--- ========= CONFIG =========
-local CFG = {
-  CFG_FILE = "config.lua",
-  TARGET_FIELD = 50.0, TARGET_SAT = 80.0,
-  FIELD_LOW_TRIP = 20.0,
-  TEMP_MAX = 8000, TEMP_SOFT = 6500,
-  TEMP_TURBO = 7500, TEMP_ECO = 6000,
-  IN_KP = 120000, IN_KI = 20000,
-  OUT_KP = 60000, OUT_KI = 15000,
-  IN_MIN = 0, IN_MAX = 3000000,
-  OUT_MIN = 0, OUT_MAX = 10000000,
-  CHARGE_FLOW = 900000,
-  UI_TICK = 0.25,
-  DB_FIELD = 1.0, DB_SAT = 5.0,
-  IN_SLEW_PER_SEC  = 200000,
-  OUT_SLEW_PER_SEC = 300000,
-  EMA_ALPHA = 0.25,
-  MAXGEN_LOW = 75.0, MAXGEN_HIGH = 95.0,
-  ECO_LOW = 72.0, ECO_HIGH = 82.0, ECO_OUT_CAP = 0.55,
-  TURBO_LOW = 80.0, TURBO_HIGH = 97.0, TURBO_OUT_CAP = 0.95,
-  DSAT_STRONG = 12.0, DSAT_SOFT = 6.0,
-  HIST_SIZE = 40,
-}
+-- ===== STATE =====
+local CFG = { UI_TICK=0.25, HIST_SIZE=40 }
+local S = { mon=nil, rx=nil, inp=nil, out=nil, modeOut="SAT", view="DASH", buttons={} }
 
--- ========= STATE =========
-local S = {
-  mon=nil, rx=nil, out=nil, inp=nil, spk=nil,
-  rxName=nil, monName=nil, inName=nil, outName=nil,
-  modeOut="SAT",
-  setIn=220000, setOut=500000,
-  iErrIn=0, iErrOut=0,
-  satMA=nil, fieldMA=nil, genMA=nil, tempMA=nil,
-  satPrev=nil, lastT=os.clock(), dSat=0,
-  action="Boot",
-  view="DASH",
-  histSAT={}, histField={}, histTemp={},
-  alarmActive=false,
-}
-
--- ========= Sonido =========
-local function play(sound)
-  if not S.spk then return end
-  pcall(function() S.spk.playSound(sound) end)
-end
-local function playNote(inst,oct,vol)
-  if not S.spk then return end
-  pcall(function() S.spk.playNote(inst,oct,vol) end)
-end
-
--- ========= Persistencia =========
-local function saveTbl(path, tbl)
-  local h=fs.open(path,"w"); h.write("return "..textutils.serialize(tbl)); h.close()
-end
-local function loadTbl(path)
-  if not fs.exists(path) then return nil end
-  local ok,t=pcall(dofile,path); if ok and type(t)=="table" then return t end
-end
-
--- ========= Descubrimiento =========
-local function detect()
+-- ===== SETUP =====
+local function setup()
   local names=peripheral.getNames()
-  local rx,mon,spk; local gates={}
+  local reactors,mons,gates={}, {}, {}
   for _,n in ipairs(names) do
-    if n:find("draconic_reactor") then rx=n end
-    if n:find("monitor") then mon=n end
-    if n:find("speaker") then spk=n end
+    if n:find("draconic_reactor") then reactors[#reactors+1]=n end
+    if n:find("monitor") then mons[#mons+1]=n end
     if n:find("flow_gate") then gates[#gates+1]=n end
   end
-  return rx, mon, gates, spk
-end
 
-local function discover()
-  local map=loadTbl(CFG.CFG_FILE)
-  local rx,mon,gates,spk=detect()
-  if not rx then error("No se detecta reactor") end
-  if not mon then error("No se detecta monitor") end
-  if #gates<2 then error("Necesitas 2 flow_gate") end
-  if not map then
-    map={reactor=rx, monitor=mon, in_gate=gates[1], out_gate=gates[2], modeOut=S.modeOut}
-    saveTbl(CFG.CFG_FILE,map)
+  local function choose(list,label)
+    print("Selecciona "..label..":")
+    for i,n in ipairs(list) do print(i..") "..n) end
+    local c
+    repeat write("> "); c=tonumber(read()) until c and c>=1 and c<=#list
+    return list[c]
   end
-  if map.modeOut then S.modeOut=map.modeOut end
-  if spk then S.spk=peripheral.wrap(spk) end
-  return map
+
+  local rx=choose(reactors,"reactor")
+  local mon=choose(mons,"monitor")
+  local in_gate=choose(gates,"flux gate IN")
+  local out_gate=choose(gates,"flux gate OUT")
+
+  local cfg={reactor=rx, monitor=mon, in_gate=in_gate, out_gate=out_gate}
+  local f=fs.open("config.lua","w")
+  f.write("return "..textutils.serialize(cfg))
+  f.close()
+  return cfg
 end
 
--- ========= Utils =========
-local function pct(n,d) if not n or not d or d==0 then return 0 end return (n/d)*100 end
+local function loadConfig()
+  if fs.exists("config.lua") then return dofile("config.lua") else return setup() end
+end
 
--- ========= Reactor info =========
+-- ===== UTILS =====
+local function pct(n,d) if not n or d==0 then return 0 end return (n/d)*100 end
 local function rxInfo()
   local ok, info = pcall(S.rx.getReactorInfo)
   if not ok or not info then return nil end
-  local t = {
-    status = info.status or "unknown",
-    gen = info.generationRate or 0,
-    temp = info.temperature or 0,
-    es = info.energySaturation or 0,
-    esMax = info.maxEnergySaturation or 1,
-    fs = info.fieldStrength or 0,
-    fsMax = info.maxFieldStrength or 1,
+  return {
+    status=info.status or "unknown",
+    gen=info.generationRate or 0,
+    temp=info.temperature or 0,
+    satP=pct(info.energySaturation, info.maxEnergySaturation),
+    fieldP=pct(info.fieldStrength, info.maxFieldStrength),
   }
-  t.satP   = pct(t.es,t.esMax)
-  t.fieldP = pct(t.fs,t.fsMax)
-  return t
 end
 
--- ========= Control =========
-local function controlTick(info, dt)
-  if not info then S.action="No reactor info"; return end
-  local a = CFG.EMA_ALPHA
-  S.satMA   = S.satMA   and (S.satMA   + a*(info.satP   - S.satMA))   or info.satP
-  S.fieldMA = S.fieldMA and (S.fieldMA + a*(info.fieldP - S.fieldMA)) or info.fieldP
-  S.genMA   = S.genMA   and (S.genMA   + a*(info.gen    - S.genMA))   or info.gen
-  S.tempMA  = S.tempMA  and (S.tempMA  + a*(info.temp   - S.tempMA))  or info.temp
-  if S.satPrev then S.dSat = (S.satMA - S.satPrev) / math.max(dt,1e-3) else S.dSat=0 end
-  S.satPrev = S.satMA
-
-  -- Historial
-  table.insert(S.histSAT, S.satMA); if #S.histSAT>CFG.HIST_SIZE then table.remove(S.histSAT,1) end
-  table.insert(S.histField, S.fieldMA); if #S.histField>CFG.HIST_SIZE then table.remove(S.histField,1) end
-  table.insert(S.histTemp, S.tempMA); if #S.histTemp>CFG.HIST_SIZE then table.remove(S.histTemp,1) end
-
-  -- Alarma crítica
-  if (info.fieldP < 15 or info.temp > 7900) and not S.alarmActive then
-    S.alarmActive=true
-    for i=1,5 do playNote("snare",3,2); sleep(0.2) end
-  elseif info.fieldP >= 20 and info.temp < 7800 then
-    S.alarmActive=false
-  end
+-- ===== UI ELEMENTS =====
+local function drawBar(mon,x,y,w,val)
+  local filled=math.floor((val/100)*w)
+  mon.setCursorPos(x,y)
+  local color=colors.green
+  if val>95 or val<20 then color=colors.red elseif val>85 or val<30 then color=colors.yellow end
+  mon.setBackgroundColor(color); mon.write(string.rep(" ",filled))
+  mon.setBackgroundColor(colors.black); mon.write(string.rep(" ",w-filled))
 end
 
--- ========= Animaciones =========
-local function animBoot(mon,map)
-  f.clear(mon); mon.setTextScale(1)
-  mon.setCursorPos(2,3); mon.write("Initializing Reactor Controller...")
-  for i=1,20 do
-    local pct=i*5
-    mon.setCursorPos(2,5)
-    mon.write("["..string.rep("#",i)..string.rep(" ",20-i).."] "..pct.."% ")
-    sleep(0.05)
-  end
-  sleep(0.5)
-
-  -- Chequeo periféricos
-  f.clear(mon); mon.setCursorPos(2,3)
-  local function check(name, ok)
-    if ok then
-      mon.setTextColor(colors.green); mon.write("> "..name.." .......... OK\n"); play("minecraft:block.note_block.pling")
+local function drawButton(id,x1,y1,x2,y2,label,active)
+  local mon=S.mon
+  S.buttons[id]={x1=x1,y1=y1,x2=x2,y2=y2}
+  for y=y1,y2 do
+    mon.setCursorPos(x1,y)
+    if active then mon.setBackgroundColor(colors.orange); mon.setTextColor(colors.black)
+    else mon.setBackgroundColor(colors.gray); mon.setTextColor(colors.white) end
+    local pad=math.max(0,(x2-x1+1-#label)//2)
+    if y==(y1+y2)//2 then
+      mon.write(string.rep(" ",pad)..label..string.rep(" ",(x2-x1+1-#label-pad)))
     else
-      mon.setTextColor(colors.red); mon.write("> "..name.." .......... FAIL\n"); playNote("bass",1,1)
-    end
-    mon.setTextColor(colors.white)
-  end
-  check("Reactor ("..(map.reactor or "?")..")", map.reactor and peripheral.isPresent(map.reactor))
-  check("Monitor ("..(map.monitor or "?")..")", map.monitor and peripheral.isPresent(map.monitor))
-  check("FluxGate IN ("..(map.in_gate or "?")..")", map.in_gate and peripheral.isPresent(map.in_gate))
-  check("FluxGate OUT("..(map.out_gate or "?")..")", map.out_gate and peripheral.isPresent(map.out_gate))
-  check("Mode ["..(S.modeOut or "?").."]", true)
-  sleep(2)
-end
-
-local function animCharging(mon,fieldPct)
-  f.clear(mon); mon.setTextScale(1)
-  mon.setCursorPos(2,5); mon.write("Reactor Charging...")
-  local barW=30
-  local fill=math.floor((fieldPct/100)*barW)
-  mon.setCursorPos(2,7)
-  mon.write("["..string.rep("=",fill)..string.rep(" ",barW-fill).."] "..math.floor(fieldPct).."%")
-  if fieldPct>=50 then
-    mon.setCursorPos(2,9); mon.setTextColor(colors.green); mon.write("Ready to Activate"); mon.setTextColor(colors.white)
-  end
-end
-
--- ========= HUD =========
-local function drawGraph(mon,x,y,w,h,hist,maxv,typeName)
-  for i=1,w do
-    local idx=#hist-w+i
-    if idx>0 then
-      local v=hist[idx] or 0
-      local percent
-      if maxv then percent=(v/maxv)*100 else percent=v end
-      local color=colors.white
-      if typeName=="SAT" then
-        if percent>95 then color=colors.red elseif percent>85 then color=colors.yellow else color=colors.blue end
-      elseif typeName=="FIELD" then
-        if percent<30 then color=colors.red elseif percent<50 then color=colors.yellow else color=colors.cyan end
-      elseif typeName=="TEMP" then
-        if v>7000 then color=colors.red elseif v>5000 then color=colors.yellow else color=colors.green end
-      end
-      local filled=math.floor((percent/100)*h)
-      for j=0,h-1 do
-        mon.setCursorPos(x+i-1,y+h-j-1)
-        if j<filled then mon.setBackgroundColor(color)
-        else mon.setBackgroundColor(colors.black) end
-        mon.write(" ")
-      end
+      mon.write(string.rep(" ",x2-x1+1))
     end
   end
-  mon.setBackgroundColor(colors.black)
+  mon.setBackgroundColor(colors.black); mon.setTextColor(colors.white)
 end
 
+-- DASH
 local function drawDash(info)
   local mon=S.mon; mon.setTextScale(1); f.clear(mon)
   local mx,my=mon.getSize()
-  mon.setCursorPos(2,1); mon.write("Reactor ("..(S.rxName or "?")..")")
-  mon.setCursorPos(mx-10,1); mon.write("[CTRL]")
-  if info.status=="charging" then
-    animCharging(mon, info.fieldP)
-    return
-  end
-  mon.setCursorPos(2,3); mon.write(("SAT: %.1f%%"):format(S.satMA or info.satP))
-  mon.setCursorPos(2,5); mon.write(("Field: %.1f%%"):format(S.fieldMA or info.fieldP))
+  mon.setCursorPos(mx//2-5,1); mon.write("REACTOR DASH")
+  mon.setCursorPos(2,3); mon.write("SAT")
+  drawBar(mon,6,3,mx-8, info.satP)
+  mon.setCursorPos(2,5); mon.write("Field")
+  drawBar(mon,8,5,mx-10, info.fieldP)
   mon.setCursorPos(2,7); mon.write(("Gen: %s RF/t"):format(f.format_int(info.gen)))
   mon.setCursorPos(2,8); mon.write(("Temp: %d C"):format(info.temp))
-  mon.setCursorPos(2,my); mon.write(S.action)
+  drawButton("CTRL", mx//2-5, my-2, mx//2+5, my-1, "Controles", false)
 end
 
+-- CTRL
 local function drawCtrl(info)
   local mon=S.mon; mon.setTextScale(1); f.clear(mon)
   local mx,my=mon.getSize()
-  mon.setCursorPos(2,1); mon.write("[BACK]")
-  mon.setCursorPos(math.floor(mx/2)-3,1); mon.write("MODES")
+  mon.setCursorPos(mx//2-4,1); mon.write("MODOS")
   local modes={"SAT","MAXGEN","ECO","TURBO","PROTECT"}
   for i,m in ipairs(modes) do
-    mon.setCursorPos(4,2+i)
-    if m==S.modeOut then mon.setBackgroundColor(colors.orange); mon.setTextColor(colors.black)
-    else mon.setBackgroundColor(colors.gray); mon.setTextColor(colors.white) end
-    mon.write(" "..m.." ")
-    mon.setBackgroundColor(colors.black); mon.setTextColor(colors.white)
+    local x1=2+(i-1)*8
+    drawButton(m,x1,3,x1+6,5,m,m==S.modeOut)
   end
-  mon.setCursorPos(2,10); mon.write("SAT history")
-  drawGraph(mon,2,11,mx-4,4,S.histSAT,100,"SAT")
-  mon.setCursorPos(2,16); mon.write("Field history")
-  drawGraph(mon,2,17,mx-4,4,S.histField,100,"FIELD")
-  mon.setCursorPos(2,22); mon.write("Temp history")
-  drawGraph(mon,2,23,mx-4,4,S.histTemp,8000,"TEMP")
+  drawButton("BACK", mx//2-4, my-2, mx//2+4, my-1, "Volver", false)
 end
 
-local function draw(info)
-  if S.view=="DASH" then drawDash(info) else drawCtrl(info) end
-end
+local function draw(info) if S.view=="DASH" then drawDash(info) else drawCtrl(info) end end
 
--- ========= Loops =========
+-- ===== LOOPS =====
 local function uiLoop()
   while true do
-    local _,_,x,y = os.pullEvent("monitor_touch")
-    local mx,_ = S.mon.getSize()
-    if S.view=="DASH" then
-      if y==1 and x>=mx-10 then
-        S.view="CTRL"
-      end
-    else
-      if y==1 and x<=6 then
-        S.view="DASH"
-      end
-      local modes={"SAT","MAXGEN","ECO","TURBO","PROTECT"}
-      for i,m in ipairs(modes) do
-        if y==2+i and x>=4 and x<=10 then
-          S.modeOut=m
-          local map=loadTbl(CFG.CFG_FILE) or {}
-          map.modeOut=S.modeOut
-          saveTbl(CFG.CFG_FILE,map)
-        end
+    local _,_,x,y=os.pullEvent("monitor_touch")
+    for id,btn in pairs(S.buttons) do
+      if x>=btn.x1 and x<=btn.x2 and y>=btn.y1 and y<=btn.y2 then
+        if id=="CTRL" then S.view="CTRL"
+        elseif id=="BACK" then S.view="DASH"
+        else S.modeOut=id end
       end
     end
   end
@@ -285,28 +160,20 @@ end
 
 local function tickLoop()
   while true do
-    local now = os.clock()
-    local dt  = now - S.lastT
-    S.lastT   = now
-
-    local info = rxInfo()
-    if info then
-      controlTick(info,dt)
-      draw(info)
-    end
+    local info=rxInfo()
+    if info then draw(info) end
     sleep(CFG.UI_TICK)
   end
 end
 
--- ========= MAIN =========
+-- ===== MAIN =====
 local function main()
-  local map = discover()
-  S.rx  = peripheral.wrap(map.reactor); S.rxName  = map.reactor
-  S.mon = peripheral.wrap(map.monitor); S.monName = map.monitor
-  S.inp = peripheral.wrap(map.in_gate); S.inName  = map.in_gate
-  S.out = peripheral.wrap(map.out_gate); S.outName= map.out_gate
-  animBoot(S.mon,map)
-  parallel.waitForAny(tickLoop, uiLoop)
+  local cfg=loadConfig()
+  S.rx=peripheral.wrap(cfg.reactor)
+  S.mon=peripheral.wrap(cfg.monitor)
+  S.inp=peripheral.wrap(cfg.in_gate)
+  S.out=peripheral.wrap(cfg.out_gate)
+  parallel.waitForAny(tickLoop,uiLoop)
 end
 
 main()
