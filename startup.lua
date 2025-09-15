@@ -26,10 +26,10 @@ local CFG = {
 
   -- Límites y protección
   FIELD_LOW_TRIP = 20.0,
-  TEMP_MAX = 8000,     -- hard stop
-  TEMP_SOFT = 6500,    -- recorte OUT progresivo
-  TEMP_TURBO = 7500,   -- techo TURBO
-  TEMP_ECO   = 6000,   -- techo ECO
+  TEMP_MAX = 8000,
+  TEMP_SOFT = 6500,
+  TEMP_TURBO = 7500,
+  TEMP_ECO   = 6000,
 
   -- Control IN (campo)
   IN_KP = 120000, IN_KI = 20000,
@@ -37,41 +37,43 @@ local CFG = {
   -- Control OUT (PI cuando aplica)
   OUT_KP = 60000, OUT_KI = 15000,
 
+  -- Límites de flujos
   IN_MIN = 0, IN_MAX = 3000000,
-OUT_MIN = 0, OUT_MAX = 10000000,
-CHARGE_FLOW = 900000,
+  OUT_MIN = 0, OUT_MAX = 10000000,
+
+  CHARGE_FLOW = 900000,
 
   -- UI / tasa de control
   UI_TICK = 0.25,
 
   -- Zonas muertas
-  DB_FIELD = 1.0,   -- %
-  DB_SAT   = 5.0,   -- %
+  DB_FIELD = 1.0,
+  DB_SAT   = 5.0,
 
   -- Rampas (slew)
-  IN_SLEW_PER_SEC  = 200_000,
-  OUT_SLEW_PER_SEC = 300_000,
+  IN_SLEW_PER_SEC  = 200000,
+  OUT_SLEW_PER_SEC = 300000,
 
   -- Filtros
   EMA_ALPHA = 0.25,
 
-  -- MAXGEN bandas (% SAT)
+  -- MAXGEN bandas
   MAXGEN_LOW  = 75.0,
   MAXGEN_HIGH = 95.0,
 
   -- ECO bandas / topes
   ECO_LOW     = 72.0,
   ECO_HIGH    = 82.0,
-  ECO_OUT_CAP = 0.55,  -- % de OUT_MAX
+  ECO_OUT_CAP = 0.55,
 
   -- TURBO bandas / topes
   TURBO_LOW     = 80.0,
   TURBO_HIGH    = 97.0,
-  TURBO_OUT_CAP = 0.95, -- % de OUT_MAX
+  TURBO_OUT_CAP = 0.95,
 
-  -- PROTECT: reaccionar a pendientes y T
-  DSAT_STRONG = 12.0,  -- %/s subida fuerte
-  DSAT_SOFT   = 6.0,   -- %/s subida moderada
+  -- PROTECT
+  DSAT_STRONG = 12.0,
+  DSAT_SOFT   = 6.0,
 }
 
 -- ========= STATE =========
@@ -79,14 +81,11 @@ local S = {
   mon=nil, rx=nil, out=nil, inp=nil,
   monName=nil, rxName=nil, outName=nil, inName=nil,
 
-  -- modos: "SAT" | "MAXGEN" | "ECO" | "TURBO" | "PROTECT"
   modeOut="SAT",
 
-  -- setpoints actuales
   setIn=220000, setOut=500000,
   iErrIn=0, iErrOut=0,
 
-  -- filtros y derivadas
   satMA=nil, fieldMA=nil, genMA=nil, tempMA=nil,
   satPrev=nil, lastT=os.clock(), dSat=0,
 
@@ -120,16 +119,10 @@ local function discover()
   if #gates<2 then error("Necesitas al menos 2 flow_gate_*") end
 
   if not map then
-    if #gates==2 then
-      map={reactor=rx, monitor=mon, in_gate=gates[1], out_gate=gates[2], modeOut=S.modeOut}
-      saveTbl(CFG.CFG_FILE,map)
-    else
-      map={reactor=rx, monitor=mon, in_gate=gates[1], out_gate=gates[2], modeOut=S.modeOut}
-      saveTbl(CFG.CFG_FILE,map)
-    end
+    map={reactor=rx, monitor=mon, in_gate=gates[1], out_gate=gates[2], modeOut=S.modeOut}
+    saveTbl(CFG.CFG_FILE,map)
   end
 
-  -- aplicar modo guardado
   if map.modeOut then S.modeOut=map.modeOut end
   return map
 end
@@ -169,14 +162,12 @@ end
 local function controlTick(info, dt)
   if not info then S.action="No reactor info"; return end
 
-  -- Filtros EMA
   local a = CFG.EMA_ALPHA
   S.satMA   = S.satMA   and (S.satMA   + a*(info.satP   - S.satMA))   or info.satP
   S.fieldMA = S.fieldMA and (S.fieldMA + a*(info.fieldP - S.fieldMA)) or info.fieldP
   S.genMA   = S.genMA   and (S.genMA   + a*(info.gen    - S.genMA))   or info.gen
   S.tempMA  = S.tempMA  and (S.tempMA  + a*(info.temp   - S.tempMA))  or info.temp
 
-  -- Derivada de SAT (%/s)
   if S.satPrev then S.dSat = (S.satMA - S.satPrev) / math.max(dt,1e-3) else S.dSat=0 end
   S.satPrev = S.satMA
 
@@ -185,7 +176,6 @@ local function controlTick(info, dt)
   local temp  = S.tempMA
   local gen   = S.genMA
 
-  -- Failsafes duros
   if field <= CFG.FIELD_LOW_TRIP then
     S.action="EMERG: Field low"
     S.inp.set(CFG.CHARGE_FLOW); S.setOut = CFG.OUT_MIN; S.out.set(S.setOut)
@@ -197,7 +187,6 @@ local function controlTick(info, dt)
     return
   end
 
-  -- ===== IN (campo) PI =====
   local errF = CFG.TARGET_FIELD - field
   if math.abs(errF) <= CFG.DB_FIELD then errF = 0 end
   S.iErrIn = clamp(S.iErrIn + errF*dt, -1000, 1000)
@@ -205,18 +194,15 @@ local function controlTick(info, dt)
   S.setIn = slew(S.setIn, desiredIn, CFG.IN_SLEW_PER_SEC, dt)
   S.inp.set(S.setIn)
 
-  -- ===== OUT según modo =====
   local desiredOut = S.setOut
 
   if S.modeOut=="SAT" then
-    local err = sat - CFG.TARGET_SAT -- sat>target => abrir OUT
+    local err = sat - CFG.TARGET_SAT
     if math.abs(CFG.TARGET_SAT - sat) <= CFG.DB_SAT then err = 0 end
     S.iErrOut = clamp(S.iErrOut + err*dt, -1000, 1000)
     desiredOut = clamp(S.setOut + (CFG.OUT_KP*err + CFG.OUT_KI*S.iErrOut)*dt, CFG.OUT_MIN, CFG.OUT_MAX)
-
-    -- si SAT sube rápido, ayuda a drenar
     if S.dSat > CFG.DSAT_SOFT then
-      desiredOut = math.min(desiredOut + S.dSat*40_000, CFG.OUT_MAX*0.8)
+      desiredOut = math.min(desiredOut + S.dSat*40000, CFG.OUT_MAX*0.8)
     end
 
   elseif S.modeOut=="MAXGEN" then
@@ -227,16 +213,14 @@ local function controlTick(info, dt)
     else
       desiredOut = CFG.OUT_MAX * 0.7
     end
-    -- recorte por temperatura
     if temp > CFG.TEMP_SOFT then
       local k = 1 - math.min((temp - CFG.TEMP_SOFT) / (CFG.TEMP_MAX - CFG.TEMP_SOFT), 1)
       desiredOut = desiredOut * (0.4 + 0.6*k)
     end
 
   elseif S.modeOut=="ECO" then
-    -- mantener entre 72–82% con topes bajos
     if sat > CFG.ECO_HIGH then
-      desiredOut = math.min(S.setOut + (sat-CFG.ECO_HIGH)*40_000, CFG.OUT_MAX*CFG.ECO_OUT_CAP)
+      desiredOut = math.min(S.setOut + (sat-CFG.ECO_HIGH)*40000, CFG.OUT_MAX*CFG.ECO_OUT_CAP)
     elseif sat < CFG.ECO_LOW then
       desiredOut = CFG.OUT_MIN
     else
@@ -245,7 +229,6 @@ local function controlTick(info, dt)
     if temp > CFG.TEMP_ECO then desiredOut = math.min(desiredOut, CFG.OUT_MAX*0.4) end
 
   elseif S.modeOut=="TURBO" then
-    -- máxima extracción con bandas amplias
     if sat > CFG.TURBO_HIGH then
       desiredOut = CFG.OUT_MAX * CFG.TURBO_OUT_CAP
     elseif sat < CFG.TURBO_LOW then
@@ -256,7 +239,6 @@ local function controlTick(info, dt)
     if temp > CFG.TEMP_TURBO then desiredOut = math.min(desiredOut, CFG.OUT_MAX*0.7) end
 
   elseif S.modeOut=="PROTECT" then
-    -- si SAT < 60 o temp sube rápido → cerrar; si SAT > 90 → abrir algo para no saturar
     if sat < 60 or S.dSat < -CFG.DSAT_SOFT then
       desiredOut = CFG.OUT_MIN
     elseif sat > 90 or S.dSat > CFG.DSAT_STRONG then
@@ -264,15 +246,12 @@ local function controlTick(info, dt)
     else
       desiredOut = math.min(S.setOut, CFG.OUT_MAX*0.5)
     end
-    -- recorte térmico agresivo
     if temp > CFG.TEMP_SOFT then desiredOut = math.min(desiredOut, CFG.OUT_MAX*0.4) end
   end
 
-  -- rampa + aplicar
   S.setOut = slew(S.setOut, desiredOut, CFG.OUT_SLEW_PER_SEC, dt)
   S.out.set(S.setOut)
 
-  -- Acción
   S.action = ("IN=%s OUT=%s | %s  SAT=%.1f%% dSAT=%.1f%%/s T=%dC")
     :format(f.si(S.setIn), f.si(S.setOut), S.modeOut, sat, S.dSat, temp)
 end
@@ -318,7 +297,6 @@ local function draw(info)
 
   f.textLR(mon,2,12,"Action",S.action,colors.gray,colors.gray)
 
-  -- Botón de modo
   f.button(mon,mx-14,2,"MODE:"..S.modeOut,colors.orange)
 end
 
@@ -328,12 +306,10 @@ local function uiLoop()
     local _,_,x,y=os.pullEvent("monitor_touch")
     local mx,_=S.mon.getSize()
     if y==2 and x>=mx-14 then
-      -- ciclo de modos
       local order = { "SAT","MAXGEN","ECO","TURBO","PROTECT" }
       local idx=1
       for i,v in ipairs(order) do if v==S.modeOut then idx=i break end end
       S.modeOut = order[(idx % #order)+1]
-      -- persistir modo en config
       local map = loadTbl(CFG.CFG_FILE) or {}
       map.modeOut = S.modeOut; saveTbl(CFG.CFG_FILE,map)
     end
