@@ -1,19 +1,22 @@
-
+---------------------------
+-- FILE: startup.lua
+---------------------------
 
 local f = dofile("lib/f.lua")
 
 -- ========= CONFIG =========
 local CFG = {
-  -- Opcional: fija NOMBRES EXACTOS (como aparecen en `peripheral.getNames()`)
-  REACTOR = nil,            -- nil => auto o asistente
-  OUT_GATE = nil,           -- nil => auto/calibración/asistente
-  IN_GATE  = nil,           -- nil => auto/calibración/asistente
-  MONITOR  = nil,           -- nil => auto (elige el más grande)
-  ALARM_RS_SIDE = nil,      -- e.g. "top" para lámpara/sirena por redstone
+  -- Puedes fijar NOMBRES EXACTOS (como salen en `peripheral.getNames()`)
+  REACTOR = "draconic_reactor_1", -- nil => auto o asistente
+  OUT_GATE = "flow_gate_9",        -- nil => auto/calibración/asistente
+  IN_GATE  = "flow_gate_4",        -- nil => auto/calibración/asistente
+  MONITOR  = "monitor_5",          -- nil => auto (elige el más grande)
+  ALARM_RS_SIDE = nil,              -- e.g. "top" para lámpara/sirena por redstone
 
   -- Targets & thresholds
   TARGET_FIELD = 50.0,      -- % objetivo de campo
-  TARGET_SAT   = 65.0,      -- % objetivo de saturación
+  TARGET_SAT   = 65.0,      -- % objetivo de saturación (modo SAT)
+  TARGET_GEN_RFPT = 3_000_000, -- RF/t objetivo (modo GEN)
   FIELD_LOW_TRIP = 20.0,    -- % emergencia si baja de esto
   TEMP_MAX = 8000,          -- C
   TEMP_SAFE = 3000,         -- C (reanudar por debajo)
@@ -30,9 +33,11 @@ local CFG = {
   UI_TICK = 0.25,           -- s por ciclo
   DB_FIELD = 1.0,           -- histéresis campo
   DB_SAT = 2.0,             -- histéresis saturación
+  DB_GEN = 0.02,            -- 2% del target gen como zona muerta
 
   -- Persistencia
   CFG_FILE = "config.lua",  -- guarda el mapeo aquí
+  MODE_OUT = "SAT",         -- "SAT" (por saturación) o "GEN" (por generación)
 }
 
 -- ========= STATE =========
@@ -46,6 +51,7 @@ local S = {
   action = "Boot",
   alarm = false,
   setupMode = false,
+  modeOut = CFG.MODE_OUT, -- "SAT" o "GEN"
 }
 
 -- ========= PERSISTENCE =========
@@ -71,7 +77,6 @@ local function pickMonitor()
   table.sort(mons, function(a,b)
     local ax,ay=a.getSize(); local bx,by=b.getSize(); return ax*ay>bx*by
   end)
-  -- Need name; derive from wrapped by scanning names
   for _,name in ipairs(peripheral.getNames()) do
     local p=peripheral.wrap(name); if p==mons[1] then S.monName=name; break end
   end
@@ -161,12 +166,10 @@ local function setAlarm(on) if CFG.ALARM_RS_SIDE then redstone.setOutput(CFG.ALA
 
 -- ========= CALIBRATION (auto-roles) =========
 local function calibrateRoles(inpGate, outGate, gates)
-  -- If exactly 2 gates and reactor online, try to detect which is input/output safely.
   local info = rxInfo(); if not info then return nil end
   if info.status ~= "online" and info.status ~= "charged" then return nil end
   if #gates ~= 2 then return nil end
 
-  -- Freeze controllers during test
   local oldAutoIn, oldAutoOut = S.autoIn, S.autoOut
   S.autoIn=false; S.autoOut=false
   local g1, g2 = gates[1], gates[2]
@@ -178,20 +181,17 @@ local function calibrateRoles(inpGate, outGate, gates)
     return i0, i1
   end
 
-  -- Nudge g1 up a bit and watch field/sat
   local step = 20000
   local i0, i1 = measureDelta(function() g1w.set(s1o + step) end)
   g1w.set(s1o)
   local df_field1 = (i1.fieldP - i0.fieldP)
   local df_sat1   = (i1.satP - i0.satP)
 
-  -- Nudge g2 up a bit
   local j0, j1 = measureDelta(function() g2w.set(s2o + step) end)
   g2w.set(s2o)
   local df_field2 = (j1.fieldP - j0.fieldP)
   local df_sat2   = (j1.satP - j0.satP)
 
-  -- Heuristics: input step -> sube fieldP (df_field > 0); output step -> baja satP (df_sat < 0)
   local input, output
   if df_field1 > 0.05 and df_sat1 > -0.1 then input=g1; output=g2 end
   if df_field2 > 0.05 and df_sat2 > -0.1 then input=g2; output=g1 end
@@ -230,7 +230,6 @@ end
 
 local function setupWizard()
   S.setupMode=true
-  -- construir listas por nombre
   local reactors = {}
   for _,p in ipairs(findReactors()) do table.insert(reactors, nameOf(p)) end
   local mons = {}
@@ -255,25 +254,22 @@ local function setupWizard()
     if inRect(12,10,(st.gateList[st.outIdx] and st.gateList[st.outIdx].name) or "—") then st.outIdx = st.outIdx % #st.gateList + 1; drawSetup(st) end
 
     if inRect(2, my-3, "Auto-calibrar (si online)") then
-      -- Intentar autocalibrar usando las dos primeras puertas
-      local names = {st.gateList[1].name, st.gateList[2].name}
       local map = {reactor=st.rxList[st.rxIdx], monitor=st.monList[st.monIdx]}
       S.rx = peripheral.wrap(map.reactor); S.mon = peripheral.wrap(map.monitor)
       local pair = {st.gateList[1], st.gateList[2]}
-      local inName, outName = calibrateRoles(nil,nil, pair)
-      if inName and outName then st.inIdx = (inName==pair[1].name) and 1 or 2; st.outIdx = (outName==pair[1].name) and 1 or 2 end
+      if #pair==2 then
+        local inName, outName = calibrateRoles(nil,nil, pair)
+        if inName and outName then st.inIdx = (inName==pair[1].name) and 1 or 2; st.outIdx = (outName==pair[1].name) and 1 or 2 end
+      end
       drawSetup(st)
     end
 
     if inRect(2, my-1, "Refrescar") then return setupWizard() end
     if inRect(mx-16, my-1, "Guardar & Iniciar") then
       if st.inIdx==st.outIdx then
-        -- no permite iguales
+        -- ignorar, deben ser distintos
       else
-        local map = {
-          reactor = st.rxList[st.rxIdx], monitor = st.monList[st.monIdx],
-          in_gate = st.gateList[st.inIdx].name, out_gate = st.gateList[st.outIdx].name,
-        }
+        local map = {reactor=st.rxList[st.rxIdx], monitor=st.monList[st.monIdx], in_gate=st.gateList[st.inIdx].name, out_gate=st.gateList[st.outIdx].name}
         saveTbl(CFG.CFG_FILE, map)
         applyMapping(map)
         S.setupMode=false
@@ -284,13 +280,11 @@ local function setupWizard()
 end
 
 local function discover()
-  -- 1) Cargar config si existe o está fija en CFG
   local persisted = loadTbl(CFG.CFG_FILE)
   if persisted and peripheral.wrap(persisted.reactor) and peripheral.wrap(persisted.monitor)
      and peripheral.wrap(persisted.in_gate) and peripheral.wrap(persisted.out_gate) then
     applyMapping(persisted)
   else
-    -- Intento auto simple (si hay exactamente 1 reactor, 1 monitor y 2 gates)
     S.mon = pickMonitor(); if not S.mon then error("Sin monitor (con módem)") end
     local rxs = findReactors(); if #rxs==0 then error("Sin reactor por módem (stabilizer)") end
     S.rx = rxs[1]; S.rxName = nameOf(S.rx)
@@ -298,20 +292,15 @@ local function discover()
 
     if #gates==2 then
       local inName, outName = calibrateRoles(nil,nil, gates)
-      if not inName then
-        -- fallback: asignar arbitrariamente pero requerir asistente
-        S.setupMode = true
-      else
+      if not inName then S.setupMode = true else
         local map = {reactor=S.rxName, monitor=S.monName or nameOf(S.mon), in_gate=inName, out_gate=outName}
         saveTbl(CFG.CFG_FILE, map); applyMapping(map)
       end
     else
-      -- múltiples: usar asistente
       setupWizard()
     end
   end
 
-  -- Wrap setters si venimos de pickMonitor()
   if not S.inp or not S.out then
     S.inp = wrapFluxSetter(peripheral.wrap(S.inName))
     S.out = wrapFluxSetter(peripheral.wrap(S.outName))
@@ -351,9 +340,19 @@ local function controlTick(info, dt)
     S.setIn = clamp(S.setIn, CFG.IN_MIN, CFG.IN_MAX); S.inp.set(S.setIn)
   end
 
-  -- Output: mantener saturación (y ayudar a enfriar)
+  -- Output: modo SAT o GEN
   if S.autoOut then
-    local err = CFG.TARGET_SAT - info.satP; if math.abs(err)<=CFG.DB_SAT then err=0 end
+    local err
+    if S.modeOut=="SAT" then
+      err = CFG.TARGET_SAT - info.satP
+      if math.abs(err) <= CFG.DB_SAT then err = 0 end
+    else -- GEN
+      -- Normaliza error de generación como % del objetivo para reutilizar ganancias
+      local target = math.max(1, CFG.TARGET_GEN_RFPT)
+      local e = (CFG.TARGET_GEN_RFPT - info.gen) / target * 100
+      if math.abs(e) <= (CFG.DB_GEN*100) then e = 0 end
+      err = e
+    end
     S.iErrOut = clamp(S.iErrOut + err*dt, -1000, 1000)
     S.setOut = clamp(S.setOut + (CFG.OUT_KP*err + CFG.OUT_KI*S.iErrOut)*dt, CFG.OUT_MIN, CFG.OUT_MAX)
     if info.temp > 7000 then S.setOut = S.setOut * 0.7 end
@@ -377,6 +376,12 @@ local function draw(info)
   f.textLR(mon,2,4,"Monitor", S.monName or "?", colors.gray, colors.gray)
   f.textLR(mon,2,6,"Gates", (S.inName or "?").." [IN]  |  "..(S.outName or "?").." [OUT]", colors.gray, colors.cyan)
 
+  -- Botones de cabecera: MODE y SETUP, siempre visibles
+  local modeLabel = "MODE:"..S.modeOut
+  local modeX = math.max(2, (mx - 10) - (#modeLabel + 2))
+  f.button(mon, modeX, 2, modeLabel, colors.blue)
+  f.button(mon, mx-10, 2, "SETUP", colors.orange)
+
   f.textLR(mon,2,8,"Generation", f.format_int(info.gen).." RF/t", colors.white, colors.lime)
   local tcol=colors.red; if info.temp<5000 then tcol=colors.lime elseif info.temp<6500 then tcol=colors.orange end
   f.textLR(mon,2,10,"Temperature", f.format_int(info.temp).." C", colors.white, tcol)
@@ -392,7 +397,6 @@ local function draw(info)
   f.bar(mon,2,19,mx-2,info.fieldP,100,fcol)
 
   f.textLR(mon,2,my-3,"Action", S.action, colors.gray, colors.gray)
-  f.button(mon, mx-10, 2, "SETUP", colors.orange)
 
   -- Botonera OUT (fila my-1) e IN (fila my)
   local y1=my-1; local y2=my
@@ -409,7 +413,13 @@ local function handleTouch(x,y)
   local mon=S.mon; local mx,my=mon.getSize()
   local function inRect(cx,cy,label) return x>=cx and x<=cx+#label-1 and y==cy end
 
+  -- SETUP siempre visible
   if inRect(mx-10,2,"SETUP") then setupWizard(); return end
+
+  -- MODE toggle (SAT/GEN)
+  local modeLabel = "MODE:"..S.modeOut
+  local modeX = math.max(2, (mx - 10) - (#modeLabel + 2))
+  if inRect(modeX,2,modeLabel) then S.modeOut = (S.modeOut=="SAT") and "GEN" or "SAT"; return end
 
   -- OUT manual
   local y1=my-1
@@ -462,5 +472,3 @@ end
 
 local ok, err = pcall(main)
 if not ok then if S.mon then f.clear(S.mon); S.mon.setCursorPos(2,2); S.mon.write("Error:"); S.mon.setCursorPos(2,3); S.mon.write(err or "unknown") end error(err) end
-
-
