@@ -22,10 +22,6 @@ Design goals
 ]]
 
 
----------------------------
--- FILE: startup.lua
----------------------------
-
 local f = dofile("lib/f.lua")
 
 -- ========= CONFIG =========
