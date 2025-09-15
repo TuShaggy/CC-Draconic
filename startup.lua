@@ -1,3 +1,27 @@
+--[[
+ATM10 Draconic Reactor Controller (CC:Tweaked)
+Author: Fabian + ChatGPT
+Repo layout (drop these files into your ComputerCraft computer):
+
+startup.lua
+lib/f.lua
+installer.lua (optional; to self-update from your GitHub)
+
+Requirements
+- CC:Tweaked
+- Draconic Evolution (reactor + 2 flux gates)
+- (Recommended) Advanced Peripherals (for charge/activate/stop via API if present)
+- 3x3 Advanced Monitor, **all devices connected only via wired modems** (ningún bloque tocando al reactor)
+
+Design goals
+- **No suposiciones de lados**: ningún periférico necesita tocar al reactor; todo va por red cableada.
+- **Descubrimiento automático** + **asistente de mapeo** (UI) para elegir qué flux gate es **INPUT** y cuál es **OUTPUT** cuando hay más de 2.
+- **Calibración automática segura** para diferenciar puertas si solo hay 2.
+- **PI controllers** para regular input (campo) y output (saturación o generación objetivo).
+- **Failsafes** y sin `goto`.
+]]
+
+
 ---------------------------
 -- FILE: startup.lua
 ---------------------------
