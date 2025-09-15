@@ -1,5 +1,4 @@
--- ATM10 Draconic Reactor Controller — startup.lua (Dual Mode)
--- SAT mode (PI control) / MAXGEN mode (band control)
+-- ATM10 Draconic Reactor Controller — startup.lua (3 modos: MAN, SAT, MAXGEN)
 -- Autor: Fabian + ChatGPT
 
 -- ===== Helpers =====
@@ -48,7 +47,7 @@ local S = {
   lastT=os.clock(),
   action="Boot",
   alarm=false,
-  modeOut="SAT",   -- SAT | MAXGEN
+  modeOut="SAT",   -- MAN | SAT | MAXGEN
   satMA=nil, fieldMA=nil, genMA=nil,
 }
 
@@ -136,7 +135,7 @@ local function controlTick(info, dt)
     S.action="EMERG: Temp high"; S.setOut=CFG.OUT_MIN; S.out.set(S.setOut); return
   end
 
-  -- IN control
+  -- IN control siempre PI (campo)
   if S.autoIn then
     local err = CFG.TARGET_FIELD - field
     if math.abs(err)<=CFG.DB_FIELD then err=0 end
@@ -146,22 +145,25 @@ local function controlTick(info, dt)
     S.inp.set(S.setIn)
   end
 
-  -- OUT control
-  if S.autoOut then
+  -- OUT control según modo
+  if S.modeOut=="MAN" then
+    -- Manual: solo failsafes actúan, valores los mueve el operador
+    S.out.set(S.setOut)
+  elseif S.modeOut=="SAT" then
+    local err = sat - CFG.TARGET_SAT
+    if math.abs(CFG.TARGET_SAT - sat) <= CFG.DB_SAT then err=0 end
+    S.iErrOut=clamp(S.iErrOut+err*dt,-1000,1000)
+    local desiredOut=clamp(S.setOut+(CFG.OUT_KP*err+CFG.OUT_KI*S.iErrOut)*dt,CFG.OUT_MIN,CFG.OUT_MAX)
+    S.setOut=slew(S.setOut,desiredOut,CFG.OUT_SLEW_PER_SEC,dt)
+    S.out.set(S.setOut)
+  elseif S.modeOut=="MAXGEN" then
     local desiredOut=S.setOut
-    if S.modeOut=="SAT" then
-      local err = sat - CFG.TARGET_SAT
-      if math.abs(CFG.TARGET_SAT - sat) <= CFG.DB_SAT then err=0 end
-      S.iErrOut=clamp(S.iErrOut+err*dt,-1000,1000)
-      desiredOut=clamp(S.setOut+(CFG.OUT_KP*err+CFG.OUT_KI*S.iErrOut)*dt,CFG.OUT_MIN,CFG.OUT_MAX)
-    elseif S.modeOut=="MAXGEN" then
-      if sat > 95 then
-        desiredOut=CFG.OUT_MAX*0.8
-      elseif sat < 75 then
-        desiredOut=CFG.OUT_MIN
-      else
-        desiredOut=CFG.OUT_MAX*0.7
-      end
+    if sat > 95 then
+      desiredOut=CFG.OUT_MAX*0.8
+    elseif sat < 75 then
+      desiredOut=CFG.OUT_MIN
+    else
+      desiredOut=CFG.OUT_MAX*0.7
     end
     if info.temp > 6500 then desiredOut=math.min(desiredOut,CFG.OUT_MAX*0.6) end
     S.setOut=slew(S.setOut,desiredOut,CFG.OUT_SLEW_PER_SEC,dt)
@@ -201,7 +203,7 @@ local function draw(info)
   local mon=S.mon
   mon.setTextScale(0.5)
   f.clear(mon)
-  local mx,_=mon.getSize()
+  local mx,my=mon.getSize()
   local barW=math.max(20,math.min(50,mx-12))
 
   f.textLR(mon,2,2,"Reactor ("..(S.rxName or "?")..")",string.upper(info.status),colors.white,colors.lime)
@@ -221,15 +223,35 @@ local function draw(info)
 
   -- Botón de cambio de modo
   f.button(mon,mx-12,2,"MODE:"..S.modeOut,colors.orange)
+
+  -- En manual, botones de ajuste
+  if S.modeOut=="MAN" then
+    f.button(mon,2,my-2,"OUT -",colors.red)
+    f.button(mon,10,my-2,"OUT +",colors.green)
+    f.button(mon,18,my-2,"IN -",colors.red)
+    f.button(mon,26,my-2,"IN +",colors.green)
+  end
 end
 
 -- ========= Loops =========
 local function uiLoop()
   while true do
     local _,_,x,y=os.pullEvent("monitor_touch")
-    local mx,_=S.mon.getSize()
+    local mx,my=S.mon.getSize()
+    -- Botón de modo
     if y==2 and x>=mx-12 then
-      if S.modeOut=="SAT" then S.modeOut="MAXGEN" else S.modeOut="SAT" end
+      if S.modeOut=="MAN" then S.modeOut="SAT"
+      elseif S.modeOut=="SAT" then S.modeOut="MAXGEN"
+      else S.modeOut="MAN" end
+    end
+    -- En manual, botones de ajuste
+    if S.modeOut=="MAN" then
+      if y==my-2 then
+        if x>=2 and x<=7 then S.setOut=clamp(S.setOut-100000,CFG.OUT_MIN,CFG.OUT_MAX) end
+        if x>=10 and x<=15 then S.setOut=clamp(S.setOut+100000,CFG.OUT_MIN,CFG.OUT_MAX) end
+        if x>=18 and x<=23 then S.setIn=clamp(S.setIn-100000,CFG.IN_MIN,CFG.IN_MAX) end
+        if x>=26 and x<=31 then S.setIn=clamp(S.setIn+100000,CFG.IN_MIN,CFG.IN_MAX) end
+      end
     end
   end
 end
