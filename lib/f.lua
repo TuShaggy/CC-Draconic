@@ -1,7 +1,3 @@
----------------------------
--- FILE: lib/f.lua
----------------------------
-
 local f = {}
 
 local function drawPad(mon, x, y, label, fg, bg)
