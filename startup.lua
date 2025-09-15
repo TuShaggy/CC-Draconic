@@ -1,7 +1,7 @@
 -- ATM10 Draconic Reactor Controller (CC:Tweaked)
--- startup.lua
+-- startup.lua — adaptive layout (small monitor safe)
 -- Autor: Fabian + ChatGPT
--- Modo no-touch (todo por módem cableado), SETUP visible, modos SAT/GEN
+-- Modo no-touch (todo por módem cableado), SETUP siempre visible, modos SAT/GEN
 
 -- ===== cargar librería de UI 'f' con compat =====
 local function load_f()
@@ -19,38 +19,33 @@ local f = load_f()
 
 -- ========= CONFIG =========
 local CFG = {
-  -- Nombres exactos (como en peripheral.getNames())
-  REACTOR = "draconic_reactor_1", -- nil => auto o asistente
-  OUT_GATE = "flow_gate_9",        -- nil => auto/calibración/asistente
-  IN_GATE  = "flow_gate_4",        -- nil => auto/calibración/asistente
-  MONITOR  = "monitor_5",          -- nil => auto (elige el más grande)
-  ALARM_RS_SIDE = nil,              -- e.g. "top" para lámpara/sirena por redstone
+  REACTOR = "draconic_reactor_1",
+  OUT_GATE = "flow_gate_9",
+  IN_GATE  = "flow_gate_4",
+  MONITOR  = "monitor_5",
+  ALARM_RS_SIDE = nil,
 
-  -- Targets & thresholds
-  TARGET_FIELD = 50.0,      -- % objetivo de campo
-  TARGET_SAT   = 65.0,      -- % objetivo de saturación (modo SAT)
-  TARGET_GEN_RFPT = 3000000, -- RF/t objetivo (modo GEN)
-  FIELD_LOW_TRIP = 20.0,    -- % emergencia si baja de esto
-  TEMP_MAX = 8000,          -- C
-  TEMP_SAFE = 3000,         -- C (reanudar por debajo)
+  TARGET_FIELD = 50.0,
+  TARGET_SAT   = 65.0,
+  TARGET_GEN_RFPT = 3000000,
+  FIELD_LOW_TRIP = 20.0,
+  TEMP_MAX = 8000,
+  TEMP_SAFE = 3000,
 
-  -- Control gains (tuneables)
   IN_KP = 120000, IN_KI = 20000,
   OUT_KP = 120000, OUT_KI = 30000,
 
-  -- Límites de flujo
   IN_MIN = 0, IN_MAX = 3000000,
   OUT_MIN = 0, OUT_MAX = 10000000,
-  CHARGE_FLOW = 900000,     -- input gate durante carga
+  CHARGE_FLOW = 900000,
 
-  UI_TICK = 0.25,           -- s por ciclo
-  DB_FIELD = 1.0,           -- histéresis campo
-  DB_SAT = 2.0,             -- histéresis saturación
-  DB_GEN = 0.02,            -- 2% del target gen como zona muerta
+  UI_TICK = 0.25,
+  DB_FIELD = 1.0,
+  DB_SAT = 2.0,
+  DB_GEN = 0.02,
 
-  -- Persistencia
-  CFG_FILE = "config.lua",  -- guarda el mapeo aquí
-  MODE_OUT = "SAT",         -- "SAT" o "GEN"
+  CFG_FILE = "config.lua",
+  MODE_OUT = "SAT",
 }
 
 -- ========= STATE =========
@@ -64,7 +59,7 @@ local S = {
   action = "Boot",
   alarm = false,
   setupMode = false,
-  modeOut = CFG.MODE_OUT, -- "SAT" o "GEN"
+  modeOut = CFG.MODE_OUT,
 }
 
 -- ========= PERSISTENCE =========
@@ -88,8 +83,7 @@ local function pickMonitor()
   local mons = listPeriph("monitor")
   if #mons == 0 then return nil end
   table.sort(mons, function(a,b)
-    local ax,ay=a.getSize(); local bx,by=b.getSize(); return ax*ay>bx*by
-  end)
+    local ax,ay=a.getSize(); local bx,by=b.getSize(); return ax*ay>bx*by end)
   for _,name in ipairs(peripheral.getNames()) do
     local p=peripheral.wrap(name); if p==mons[1] then S.monName=name; break end
   end
@@ -99,9 +93,7 @@ end
 local function findReactors()
   local out = {}
   local types = {"draconic_reactor","reactor","advancedperipherals:reactor"}
-  for _,t in ipairs(types) do
-    for _,p in ipairs(listPeriph(t)) do table.insert(out, p) end
-  end
+  for _,t in ipairs(types) do for _,p in ipairs(listPeriph(t)) do table.insert(out, p) end end
   for _,name in ipairs(peripheral.getNames()) do
     local p = peripheral.wrap(name)
     if type(p.getReactorInfo)=="function" then table.insert(out, p) end
@@ -175,8 +167,8 @@ end
 local function clamp(v, lo, hi) if v<lo then return lo elseif v>hi then return hi else return v end end
 local function setAlarm(on) if CFG.ALARM_RS_SIDE then redstone.setOutput(CFG.ALARM_RS_SIDE, on) end S.alarm=on end
 
--- ========= CALIBRATION (auto-roles) =========
-local function calibrateRoles(inpGate, outGate, gates)
+-- ========= CALIBRATION =========
+local function calibrateRoles(_, _, gates)
   local info = rxInfo(); if not info then return nil end
   if info.status ~= "online" and info.status ~= "charged" then return nil end
   if #gates ~= 2 then return nil end
@@ -188,9 +180,7 @@ local function calibrateRoles(inpGate, outGate, gates)
   local s1o, s2o = g1w.get(), g2w.get()
 
   local function measureDelta(fn)
-    local i0 = rxInfo(); sleep(0.6); fn(); sleep(1.0); local i1 = rxInfo();
-    return i0, i1
-  end
+    local i0 = rxInfo(); sleep(0.6); fn(); sleep(1.0); local i1 = rxInfo(); return i0, i1 end
 
   local step = 20000
   local i0, i1 = measureDelta(function() g1w.set(s1o + step) end)
@@ -208,13 +198,11 @@ local function calibrateRoles(inpGate, outGate, gates)
   if df_field2 > 0.05 and df_sat2 > -0.1 then input=g2; output=g1 end
 
   S.autoIn=oldAutoIn; S.autoOut=oldAutoOut
-  if input and output then
-    return input.name, output.name
-  end
+  if input and output then return input.name, output.name end
   return nil
 end
 
--- ========= DISCOVER + SETUP WIZARD =========
+-- ========= DISCOVER + SETUP =========
 local function applyMapping(map)
   S.rx = peripheral.wrap(map.reactor); S.rxName = map.reactor
   S.mon = peripheral.wrap(map.monitor); S.monName = map.monitor
@@ -235,7 +223,7 @@ local function drawSetup(state)
   f.button(mon, 12,10, state.gateList[state.outIdx] and state.gateList[state.outIdx].name or "—")
 
   f.button(mon, 2, my-3, "Auto-calibrar (si online)", colors.green)
-  f.button(mon, mx-16, my-1, "Guardar & Iniciar", colors.blue)
+  f.button(mon, math.max(2, mx-16), my-1, "Guardar & Iniciar", colors.blue)
   f.button(mon, 2, my-1, "Refrescar", colors.gray)
 end
 
@@ -276,10 +264,8 @@ local function setupWizard()
     end
 
     if inRect(2, my-1, "Refrescar") then return setupWizard() end
-    if inRect(mx-16, my-1, "Guardar & Iniciar") then
-      if st.inIdx==st.outIdx then
-        -- ignorar, deben ser distintos
-      else
+    if inRect(math.max(2, mx-16), my-1, "Guardar & Iniciar") then
+      if st.inIdx~=st.outIdx then
         local map = {reactor=st.rxList[st.rxIdx], monitor=st.monList[st.monIdx], in_gate=st.gateList[st.inIdx].name, out_gate=st.gateList[st.outIdx].name}
         saveTbl(CFG.CFG_FILE, map)
         applyMapping(map)
@@ -372,6 +358,36 @@ end
 -- ========= UI =========
 local function draw(info)
   local mon=S.mon; mon.setTextScale(0.5); local mx,my=mon.getSize(); f.clear(mon)
+
+  local function clampX(x,label)
+    local maxX = math.max(1, mx - #label - 1)
+    if x < 1 then x = 1 end
+    if x > maxX then x = maxX end
+    return x
+  end
+  local function row(y) return (y <= my) and y or my end
+
+  -- Minimal UI si pantalla pequeña
+  if mx < 24 or my < 12 then
+    local infoStatus = info and (info.status or "?") or "?"
+    f.textLR(mon, 2, row(2), "Draconic Reactor", string.upper(infoStatus), colors.white, colors.lime)
+    f.textLR(mon, 2, row(4), "Gen", info and (f.format_int(info.gen).." RF/t") or "?", colors.white, colors.white)
+    f.textLR(mon, 2, row(6), "Temp", info and (f.format_int(info.temp).." C") or "?", colors.white, colors.white)
+    f.textLR(mon, 2, row(8), "Action", S.action, colors.gray, colors.gray)
+    if my >= 3 then
+      local y1 = my-1; local y2 = my
+      if y1 >= 1 then
+        local lab = S.autoOut and "OUT:AU" or "OUT:MA"
+        f.button(mon, clampX(2, lab), y1, lab, S.autoOut and colors.green or colors.orange)
+      end
+      if y2 >= 1 then
+        local lab = S.autoIn and "IN:AU" or "IN:MA"
+        f.button(mon, clampX(2, lab), y2, lab, S.autoIn and colors.green or colors.orange)
+      end
+    end
+    return
+  end
+
   local statusColor=colors.red
   if info.status=="online" or info.status=="charged" then statusColor=colors.lime
   elseif info.status=="offline" then statusColor=colors.gray elseif info.status=="charging" then statusColor=colors.orange end
@@ -380,10 +396,13 @@ local function draw(info)
   f.textLR(mon,2,4,"Monitor", S.monName or "?", colors.gray, colors.gray)
   f.textLR(mon,2,6,"Gates", (S.inName or "?").." [IN]  |  "..(S.outName or "?").." [OUT]", colors.gray, colors.cyan)
 
+  local setupLabel = "SETUP"
+  local setupX = clampX(mx - #setupLabel - 1, setupLabel)
+  f.button(mon, setupX, 2, setupLabel, colors.orange)
+
   local modeLabel = "MODE:"..S.modeOut
-  local modeX = math.max(2, (mx - 10) - (#modeLabel + 2))
+  local modeX = clampX(setupX - (#modeLabel + 2), modeLabel)
   f.button(mon, modeX, 2, modeLabel, colors.blue)
-  f.button(mon, mx-10, 2, "SETUP", colors.orange)
 
   f.textLR(mon,2,8,"Generation", f.format_int(info.gen).." RF/t", colors.white, colors.lime)
   local tcol=colors.red; if info.temp<5000 then tcol=colors.lime elseif info.temp<6500 then tcol=colors.orange end
@@ -392,52 +411,74 @@ local function draw(info)
   f.textLR(mon,2,12,"Output Gate", f.format_int(S.out.get()).." RF/t", colors.white, colors.cyan)
   f.textLR(mon,2,13,"Input Gate",  f.format_int(S.inp.get()).." RF/t", colors.white, colors.cyan)
 
+  local barW = math.max(10, mx-2)
   f.textLR(mon,2,15,"Energy Saturation", string.format("%.2f%%", info.satP), colors.white, colors.white)
-  f.bar(mon,2,16,mx-2,info.satP,100,colors.blue)
+  f.bar(mon,2,16,barW,info.satP,100,colors.blue)
 
   local fcol=colors.red; if info.fieldP>=50 then fcol=colors.lime elseif info.fieldP>30 then fcol=colors.orange end
   f.textLR(mon,2,18,(S.autoIn and ("Field Strength T:"..CFG.TARGET_FIELD) or "Field Strength"), string.format("%.2f%%", info.fieldP), colors.white, fcol)
-  f.bar(mon,2,19,mx-2,info.fieldP,100,fcol)
+  f.bar(mon,2,19,barW,info.fieldP,100,fcol)
 
-  f.textLR(mon,2,my-3,"Action", S.action, colors.gray, colors.gray)
+  local ya = my-3; if ya < 20 then ya = 20 end
+  if ya <= my then f.textLR(mon,2,ya,"Action", S.action, colors.gray, colors.gray) end
 
   local y1=my-1; local y2=my
-  f.button(mon,2,y1,"<<<"); f.button(mon,6,y1,"<<"); f.button(mon,10,y1,"<")
-  f.button(mon,14,y1,S.autoOut and "OUT:AU" or "OUT:MA", S.autoOut and colors.green or colors.orange)
-  f.button(mon,mx-13,y1,">"); f.button(mon,mx-9,y1,">>"); f.button(mon,mx-5,y1,">>>")
-
-  f.button(mon,2,y2,"<<<"); f.button(mon,6,y2,"<<"); f.button(mon,10,y2,"<")
-  f.button(mon,14,y2,S.autoIn and "IN:AU" or "IN:MA", S.autoIn and colors.green or colors.orange)
-  f.button(mon,mx-13,y2,">"); f.button(mon,mx-9,y2,">>"); f.button(mon,mx-5,y2,">>>")
+  if y1 >= 1 then
+    f.button(mon,math.max(1,2),y1,"<<<"); f.button(mon,math.max(1,6),y1,"<<"); f.button(mon,math.max(1,10),y1,"<")
+    f.button(mon,math.max(1,14),y1,S.autoOut and "OUT:AU" or "OUT:MA", S.autoOut and colors.green or colors.orange)
+    f.button(mon,clampX(mx-13,">") ,y1,">")
+    f.button(mon,clampX(mx-9,">>") ,y1,">>")
+    f.button(mon,clampX(mx-5,">>>"),y1,">>>")
+  end
+  if y2 >= 1 then
+    f.button(mon,math.max(1,2),y2,"<<<"); f.button(mon,math.max(1,6),y2,"<<"); f.button(mon,math.max(1,10),y2,"<")
+    f.button(mon,math.max(1,14),y2,S.autoIn and "IN:AU" or "IN:MA", S.autoIn and colors.green or colors.orange)
+    f.button(mon,clampX(mx-13,">") ,y2,">")
+    f.button(mon,clampX(mx-9,">>") ,y2,">>")
+    f.button(mon,clampX(mx-5,">>>"),y2,">>>")
+  end
 end
 
 local function handleTouch(x,y)
   local mon=S.mon; local mx,my=mon.getSize()
-  local function inRect(cx,cy,label) return x>=cx and x<=cx+#label-1 and y==cy end
+  local function inRect(cx,cy,label)
+    if cx < 1 then cx = 1 end
+    local maxX = math.max(1, mx - #label - 1)
+    if cx > maxX then cx = maxX end
+    return x>=cx and x<=cx+#label-1 and y==cy
+  end
 
-  if inRect(mx-10,2,"SETUP") then setupWizard(); return end
+  local setupLabel = "SETUP"
+  local setupX = math.max(1, mx - #setupLabel - 1)
+  if inRect(setupX,2,setupLabel) then setupWizard(); return end
 
   local modeLabel = "MODE:"..S.modeOut
-  local modeX = math.max(2, (mx - 10) - (#modeLabel + 2))
+  local modeX = math.max(1, setupX - (#modeLabel + 2))
   if inRect(modeX,2,modeLabel) then S.modeOut = (S.modeOut=="SAT") and "GEN" or "SAT"; return end
 
+  if my < 3 then return end
+
   local y1=my-1
-  if inRect(2,y1,"<<<") then S.setOut=S.setOut-100000; S.autoOut=false end
-  if inRect(6,y1,"<<") then S.setOut=S.setOut-10000;  S.autoOut=false end
-  if inRect(10,y1,"<") then S.setOut=S.setOut-1000;   S.autoOut=false end
-  if inRect(14,y1,S.autoOut and "OUT:AU" or "OUT:MA") then S.autoOut=not S.autoOut end
-  if inRect(mx-13,y1,">") then S.setOut=S.setOut+1000;   S.autoOut=false end
-  if inRect(mx-9,y1,">>") then S.setOut=S.setOut+10000;  S.autoOut=false end
-  if inRect(mx-5,y1,">>>") then S.setOut=S.setOut+100000; S.autoOut=false end
+  if y1 >= 1 then
+    if inRect(2,y1,"<<<") then S.setOut=S.setOut-100000; S.autoOut=false end
+    if inRect(6,y1,"<<") then S.setOut=S.setOut-10000;  S.autoOut=false end
+    if inRect(10,y1,"<") then S.setOut=S.setOut-1000;   S.autoOut=false end
+    if inRect(14,y1,S.autoOut and "OUT:AU" or "OUT:MA") then S.autoOut=not S.autoOut end
+    if inRect(mx-13,y1,">") then S.setOut=S.setOut+1000;   S.autoOut=false end
+    if inRect(mx-9,y1,">>") then S.setOut=S.setOut+10000;  S.autoOut=false end
+    if inRect(mx-5,y1,">>>") then S.setOut=S.setOut+100000; S.autoOut=false end
+  end
 
   local y2=my
-  if inRect(2,y2,"<<<") then S.setIn=S.setIn-100000; S.autoIn=false end
-  if inRect(6,y2,"<<") then S.setIn=S.setIn-10000;  S.autoIn=false end
-  if inRect(10,y2,"<") then S.setIn=S.setIn-1000;   S.autoIn=false end
-  if inRect(14,y2,S.autoIn and "IN:AU" or "IN:MA") then S.autoIn=not S.autoIn end
-  if inRect(mx-13,y2,">") then S.setIn=S.setIn+1000;   S.autoIn=false end
-  if inRect(mx-9,y2,">>") then S.setIn=S.setIn+10000;  S.autoIn=false end
-  if inRect(mx-5,y2,">>>") then S.setIn=S.setIn+100000; S.autoIn=false end
+  if y2 >= 1 then
+    if inRect(2,y2,"<<<") then S.setIn=S.setIn-100000; S.autoIn=false end
+    if inRect(6,y2,"<<") then S.setIn=S.setIn-10000;  S.autoIn=false end
+    if inRect(10,y2,"<") then S.setIn=S.setIn-1000;   S.autoIn=false end
+    if inRect(14,y2,S.autoIn and "IN:AU" or "IN:MA") then S.autoIn=not S.autoIn end
+    if inRect(mx-13,y2,">") then S.setIn=S.setIn+1000;   S.autoIn=false end
+    if inRect(mx-9,y2,">>") then S.setIn=S.setIn+10000;  S.autoIn=false end
+    if inRect(mx-5,y2,">>>") then S.setIn=S.setIn+100000; S.autoIn=false end
+  end
 end
 
 -- ========= LOOPS =========
