@@ -1,5 +1,35 @@
 # ATM10 Draconic Reactor Controller (CC\:Tweaked)
 
+## 🚀 Arranque rápido con `wget`
+
+**CC\:Tweaked** permite descargar/ejecutar scripts desde URLs crudas ("raw"). Para este repo:
+
+**Opción 1 — Ejecutar sin guardar (descarga + run):**
+
+```bash
+wget run https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/installer.lua
+```
+
+**Opción 2 — Descargar a un archivo y ejecutarlo después:**
+
+```bash
+wget https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/installer.lua installer.lua
+lua installer.lua
+# o
+shell.run("installer.lua")
+```
+
+> Usa siempre la URL **raw** (empieza por `https://raw.githubusercontent.com/...`). La página HTML normal de GitHub NO funciona con `wget`.
+
+### ⚠️ Problemas habituales
+
+* **HTTP disabled** → En el server/instancia, edita `config/cc-tweaked-server.toml` y pon `http.enabled = true`. Reinicia.
+* **404 / Not Found** → Revisa la ruta/branch (`main`) o que el archivo exista.
+* **Unknown host** → El servidor no tiene salida a Internet o DNS bloqueado.
+* **Program not found: wget** → Versión muy antigua; alternativa: `pastebin run <ID>` con el bootstrap.
+
+---
+
 Controlador seguro, modular y **sin tocar el reactor** (todo por **módem cableado**), compatible con ATM10 (MC 1.20.x). Regula **dos flux gates**: uno de **entrada** (mantener campo) y uno de **salida** (mantener saturación o alcanzar una **generación objetivo**). Incluye asistente **SETUP** en pantalla y **failsafes**.
 
 ## Requisitos
@@ -24,7 +54,7 @@ Controlador seguro, modular y **sin tocar el reactor** (todo por **módem cablea
 
 ### B) Con `wget run` directamente desde GitHub
 
-```
+```bash
 wget run https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/installer.lua
 ```
 
