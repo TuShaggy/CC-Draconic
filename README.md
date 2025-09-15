@@ -25,7 +25,7 @@ Controlador seguro, modular y **sin tocar el reactor** (todo por **módem cablea
 ### B) Con `wget run` directamente desde GitHub
 
 ```
-wget run https://raw.githubusercontent.com/TuShaggy/posta/main/installer.lua
+wget run https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/installer.lua
 ```
 
 ### C) Manual
