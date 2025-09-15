@@ -2,18 +2,18 @@
 local function drawBar(mon, x, y, w, pct, color)
   pct = math.max(0, math.min(100, pct))
   local fill = math.floor((pct/100) * w)
-  if mon.isColor and mon.isColor() then
-    for i=0,w-1 do
-      mon.setCursorPos(x+i,y)
-      if i < fill then
-        mon.setBackgroundColor(color or colors.green)
-      else
-        mon.setBackgroundColor(colors.gray)
-      end
-      mon.write(" ")
+  for i=0,w-1 do
+    mon.setCursorPos(x+i,y)
+    if i < fill then
+      mon.setBackgroundColor(color or colors.green)
+    else
+      mon.setBackgroundColor(colors.gray)
     end
-    mon.setBackgroundColor(colors.black)
-  else
+    mon.write(" ")
+  end
+  mon.setBackgroundColor(colors.black)
+end
+
     -- Fallback ASCII para monitores no avanzados (B/W)
     mon.setCursorPos(x,y)
     local bar = string.rep("#", fill)..string.rep("-", w-fill)
