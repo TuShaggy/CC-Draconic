@@ -189,23 +189,94 @@ local function animCharging(mon,fieldPct)
 end
 
 -- ========= HUD =========
--- (Aquí irían tus funciones drawGraph, drawDash, drawCtrl y draw con colores dinámicos y gráficas)
--- No las repito para no alargar demasiado, pero las de la última versión funcionan sin cambios
+local function drawGraph(mon,x,y,w,h,hist,maxv,typeName)
+  for i=1,w do
+    local idx=#hist-w+i
+    if idx>0 then
+      local v=hist[idx] or 0
+      local percent
+      if maxv then percent=(v/maxv)*100 else percent=v end
+      local color=colors.white
+      if typeName=="SAT" then
+        if percent>95 then color=colors.red elseif percent>85 then color=colors.yellow else color=colors.blue end
+      elseif typeName=="FIELD" then
+        if percent<30 then color=colors.red elseif percent<50 then color=colors.yellow else color=colors.cyan end
+      elseif typeName=="TEMP" then
+        if v>7000 then color=colors.red elseif v>5000 then color=colors.yellow else color=colors.green end
+      end
+      local filled=math.floor((percent/100)*h)
+      for j=0,h-1 do
+        mon.setCursorPos(x+i-1,y+h-j-1)
+        if j<filled then mon.setBackgroundColor(color)
+        else mon.setBackgroundColor(colors.black) end
+        mon.write(" ")
+      end
+    end
+  end
+  mon.setBackgroundColor(colors.black)
+end
+
+local function drawDash(info)
+  local mon=S.mon; mon.setTextScale(1); f.clear(mon)
+  local mx,my=mon.getSize()
+  mon.setCursorPos(2,1); mon.write("Reactor ("..(S.rxName or "?")..")")
+  mon.setCursorPos(mx-10,1); mon.write("[CTRL]")
+  if info.status=="charging" then
+    animCharging(mon, info.fieldP)
+    return
+  end
+  mon.setCursorPos(2,3); mon.write(("SAT: %.1f%%"):format(S.satMA or info.satP))
+  mon.setCursorPos(2,5); mon.write(("Field: %.1f%%"):format(S.fieldMA or info.fieldP))
+  mon.setCursorPos(2,7); mon.write(("Gen: %s RF/t"):format(f.format_int(info.gen)))
+  mon.setCursorPos(2,8); mon.write(("Temp: %d C"):format(info.temp))
+  mon.setCursorPos(2,my); mon.write(S.action)
+end
+
+local function drawCtrl(info)
+  local mon=S.mon; mon.setTextScale(1); f.clear(mon)
+  local mx,my=mon.getSize()
+  mon.setCursorPos(2,1); mon.write("[BACK]")
+  mon.setCursorPos(math.floor(mx/2)-3,1); mon.write("MODES")
+  local modes={"SAT","MAXGEN","ECO","TURBO","PROTECT"}
+  for i,m in ipairs(modes) do
+    mon.setCursorPos(4,2+i)
+    if m==S.modeOut then mon.setBackgroundColor(colors.orange); mon.setTextColor(colors.black)
+    else mon.setBackgroundColor(colors.gray); mon.setTextColor(colors.white) end
+    mon.write(" "..m.." ")
+    mon.setBackgroundColor(colors.black); mon.setTextColor(colors.white)
+  end
+  mon.setCursorPos(2,10); mon.write("SAT history")
+  drawGraph(mon,2,11,mx-4,4,S.histSAT,100,"SAT")
+  mon.setCursorPos(2,16); mon.write("Field history")
+  drawGraph(mon,2,17,mx-4,4,S.histField,100,"FIELD")
+  mon.setCursorPos(2,22); mon.write("Temp history")
+  drawGraph(mon,2,23,mx-4,4,S.histTemp,8000,"TEMP")
+end
+
+local function draw(info)
+  if S.view=="DASH" then drawDash(info) else drawCtrl(info) end
+end
 
 -- ========= Loops =========
 local function uiLoop()
   while true do
-    local _,_,x,y=os.pullEvent("monitor_touch")
-    local mx,_=S.mon.getSize()
+    local _,_,x,y = os.pullEvent("monitor_touch")
+    local mx,_ = S.mon.getSize()
     if S.view=="DASH" then
-      if y==1 and x>=mx-10 then S.view="CTRL" end
+      if y==1 and x>=mx-10 then
+        S.view="CTRL"
+      end
     else
-      if y==1 and x<=6 then S.view="DASH" end
+      if y==1 and x<=6 then
+        S.view="DASH"
+      end
       local modes={"SAT","MAXGEN","ECO","TURBO","PROTECT"}
       for i,m in ipairs(modes) do
         if y==2+i and x>=4 and x<=10 then
           S.modeOut=m
-          local map=loadTbl(CFG.CFG_FILE) or {}; map.modeOut=S.modeOut; saveTbl(CFG.CFG_FILE,map)
+          local map=loadTbl(CFG.CFG_FILE) or {}
+          map.modeOut=S.modeOut
+          saveTbl(CFG.CFG_FILE,map)
         end
       end
     end
@@ -214,22 +285,28 @@ end
 
 local function tickLoop()
   while true do
-    local now=os.clock(); local dt=now-S.lastT; S.lastT=now
-    local info=rxInfo()
-    if info then controlTick(info,dt); draw(info) end
+    local now = os.clock()
+    local dt  = now - S.lastT
+    S.lastT   = now
+
+    local info = rxInfo()
+    if info then
+      controlTick(info,dt)
+      draw(info)
+    end
     sleep(CFG.UI_TICK)
   end
 end
 
 -- ========= MAIN =========
 local function main()
-  local map=discover()
-  S.rx=peripheral.wrap(map.reactor); S.rxName=map.reactor
-  S.mon=peripheral.wrap(map.monitor); S.monName=map.monitor
-  S.inp=peripheral.wrap(map.in_gate); S.inName=map.in_gate
-  S.out=peripheral.wrap(map.out_gate); S.outName=map.out_gate
+  local map = discover()
+  S.rx  = peripheral.wrap(map.reactor); S.rxName  = map.reactor
+  S.mon = peripheral.wrap(map.monitor); S.monName = map.monitor
+  S.inp = peripheral.wrap(map.in_gate); S.inName  = map.in_gate
+  S.out = peripheral.wrap(map.out_gate); S.outName= map.out_gate
   animBoot(S.mon,map)
-  parallel.waitForAny(tickLoop,uiLoop)
+  parallel.waitForAny(tickLoop, uiLoop)
 end
 
 main()
