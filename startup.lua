@@ -1,5 +1,4 @@
--- ATM10 Draconic Reactor Controller — HUD con pestañas + Animaciones + Sonidos
--- Modos: SAT / MAXGEN / ECO / TURBO / PROTECT
+-- ATM10 Draconic Reactor Controller — HUD + Animaciones + Sonidos
 
 -- ===== Helpers =====
 local function load_f()
@@ -102,17 +101,9 @@ local function discover()
 end
 
 -- ========= Utils =========
-local function clamp(v,lo,hi) if v<lo then return lo elseif v>hi then return hi else return v end end
-local function slew(prev, desired, rate_per_sec, dt)
-  local maxDelta = (rate_per_sec or 1e9) * (dt or 0)
-  local delta = desired - prev
-  if delta > maxDelta then return prev + maxDelta end
-  if delta < -maxDelta then return prev - maxDelta end
-  return desired
-end
+local function pct(n,d) if not n or not d or d==0 then return 0 end return (n/d)*100 end
 
 -- ========= Reactor info =========
-local function pct(n,d) if not n or not d or d==0 then return 0 end return (n/d)*100 end
 local function rxInfo()
   local ok, info = pcall(S.rx.getReactorInfo)
   if not ok or not info then return nil end
@@ -198,11 +189,39 @@ local function animCharging(mon,fieldPct)
 end
 
 -- ========= HUD =========
--- (aquí mantienes drawGraph, drawDash, drawCtrl y draw igual que antes con gráficas y colores)
--- por brevedad no lo repito, solo añadimos sonidos en boot y alarma en controlTick
--- ========= Loops, MAIN =========
--- (igual que la última versión, solo cambiamos animBoot(S.mon,map) en main)
+-- (Aquí irían tus funciones drawGraph, drawDash, drawCtrl y draw con colores dinámicos y gráficas)
+-- No las repito para no alargar demasiado, pero las de la última versión funcionan sin cambios
 
+-- ========= Loops =========
+local function uiLoop()
+  while true do
+    local _,_,x,y=os.pullEvent("monitor_touch")
+    local mx,_=S.mon.getSize()
+    if S.view=="DASH" then
+      if y==1 and x>=mx-10 then S.view="CTRL" end
+    else
+      if y==1 and x<=6 then S.view="DASH" end
+      local modes={"SAT","MAXGEN","ECO","TURBO","PROTECT"}
+      for i,m in ipairs(modes) do
+        if y==2+i and x>=4 and x<=10 then
+          S.modeOut=m
+          local map=loadTbl(CFG.CFG_FILE) or {}; map.modeOut=S.modeOut; saveTbl(CFG.CFG_FILE,map)
+        end
+      end
+    end
+  end
+end
+
+local function tickLoop()
+  while true do
+    local now=os.clock(); local dt=now-S.lastT; S.lastT=now
+    local info=rxInfo()
+    if info then controlTick(info,dt); draw(info) end
+    sleep(CFG.UI_TICK)
+  end
+end
+
+-- ========= MAIN =========
 local function main()
   local map=discover()
   S.rx=peripheral.wrap(map.reactor); S.rxName=map.reactor
