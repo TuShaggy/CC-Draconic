@@ -37,7 +37,7 @@ end
 local f = load_f()
 
 -- ===== STATE =====
-local CFG = { UI_TICK=0.25, HIST_SIZE=40 }
+local CFG = { UI_TICK=0.25 }
 local S = { mon=nil, rx=nil, inp=nil, out=nil, modeOut="SAT", view="DASH", buttons={} }
 
 -- ===== SETUP =====
