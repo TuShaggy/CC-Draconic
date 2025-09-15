@@ -1,6 +1,3 @@
----------------------------
--- FILE: installer.lua
----------------------------
 -- Optional self-updater. Replace RAW_BASE with your repo raw URL.
 -- Example: https://raw.githubusercontent.com/TuShaggy/posta/main
 
