@@ -1,7 +1,7 @@
 -- Optional self-updater. Replace RAW_BASE with your repo raw URL.
 -- Example: https://raw.githubusercontent.com/TuShaggy/posta/main
 
-local RAW_BASE = "https://raw.githubusercontent.com/TuShaggy/posta/main"
+local RAW_BASE = "https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main"
 local FILES = { "startup.lua", "lib/f.lua" }
 
 local function fetch(url)
