@@ -1,4 +1,4 @@
--- ATM10 Draconic Reactor Controller — startup.lua (final)
+-- ATM10 Draconic Reactor Controller — startup.lua (final con control de saturación)
 -- Incluye autodetección, HUD completo, control PI, failsafes
 -- y setup visual con puntero para elegir IN/OUT gates.
 -- Autor: Fabian + ChatGPT
@@ -21,7 +21,7 @@ local f = load_f()
 local CFG = {
   CFG_FILE = "config.lua",
   TARGET_FIELD = 50.0,
-  TARGET_SAT   = 65.0,
+  TARGET_SAT   = 80.0,   -- objetivo de saturación al 80%
   TARGET_GEN_RFPT = 3000000,
   FIELD_LOW_TRIP = 20.0,
   TEMP_MAX = 8000,
@@ -212,6 +212,17 @@ local function controlTick(info, dt)
     end
     S.iErrOut=clamp(S.iErrOut+err*dt,-1000,1000)
     S.setOut=clamp(S.setOut+(CFG.OUT_KP*err+CFG.OUT_KI*S.iErrOut)*dt,CFG.OUT_MIN,CFG.OUT_MAX)
+
+    -- === Control extra por saturación alta ===
+    local SAT_HIGH = 95.0  -- drenar fuerte al 95%
+    local SAT_LOW  = 85.0  -- volver a control normal al 85%
+    if info.satP >= SAT_HIGH then
+      S.setOut = CFG.OUT_MAX -- abrir salida a tope
+      S.action = S.action .. " | Descargando SAT"
+    elseif info.satP <= SAT_LOW then
+      -- normal
+    end
+
     S.out.set(S.setOut)
   end
 
@@ -224,7 +235,8 @@ local function draw(info)
   f.textLR(mon,2,2,"Reactor ("..(S.rxName or "?")..")",string.upper(info.status),colors.white,colors.lime)
   f.textLR(mon,2,4,"Gen",f.format_int(info.gen).." RF/t",colors.white,colors.white)
   f.textLR(mon,2,6,"Temp",f.format_int(info.temp).." C",colors.white,colors.red)
-  f.textLR(mon,2,8,"Action",S.action,colors.gray,colors.gray)
+  f.textLR(mon,2,8,"SAT",string.format("%.1f%%",info.satP),colors.white,colors.blue)
+  f.textLR(mon,2,10,"Action",S.action,colors.gray,colors.gray)
 end
 
 -- ========= Loops =========
