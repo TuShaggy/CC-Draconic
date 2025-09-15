@@ -1,36 +1,25 @@
---[[
-ATM10 Draconic Reactor Controller (CC:Tweaked)
-Author: Fabian + ChatGPT
-Repo layout (drop these files into your ComputerCraft computer):
+-- ATM10 Draconic Reactor Controller (CC:Tweaked)
+-- startup.lua
+-- Autor: Fabian + ChatGPT
+-- Modo no-touch (todo por módem cableado), SETUP visible, modos SAT/GEN
 
-startup.lua
-lib/f.lua
-installer.lua (optional; to self-update from your GitHub)
-
-Requirements
-- CC:Tweaked
-- Draconic Evolution (reactor + 2 flux gates)
-- (Recommended) Advanced Peripherals (for charge/activate/stop via API if present)
-- 3x3 Advanced Monitor, **all devices connected only via wired modems** (ningún bloque tocando al reactor)
-
-Design goals
-- **No suposiciones de lados**: ningún periférico necesita tocar al reactor; todo va por red cableada.
-- **Descubrimiento automático** + **asistente de mapeo** (UI) para elegir qué flux gate es **INPUT** y cuál es **OUTPUT** cuando hay más de 2.
-- **Calibración automática segura** para diferenciar puertas si solo hay 2.
-- **PI controllers** para regular input (campo) y output (saturación o generación objetivo).
-- **Failsafes** y sin `goto`.
-]]
-
-
----------------------------
--- FILE: startup.lua
----------------------------
-
-local f = dofile("lib/f.lua")
+-- ===== cargar librería de UI 'f' con compat =====
+local function load_f()
+  if fs.exists("lib/f.lua") then
+    local ok, mod = pcall(dofile, "lib/f.lua")
+    if ok and type(mod)=="table" then return mod end
+  end
+  if fs.exists("lib/f") then
+    local ok = pcall(os.loadAPI, "lib/f")
+    if ok and type(_G.f)=="table" then return _G.f end
+  end
+  error("No se pudo cargar la librería 'f' (busqué lib/f.lua y lib/f)")
+end
+local f = load_f()
 
 -- ========= CONFIG =========
 local CFG = {
-  -- Puedes fijar NOMBRES EXACTOS (como salen en `peripheral.getNames()`)
+  -- Nombres exactos (como en peripheral.getNames())
   REACTOR = "draconic_reactor_1", -- nil => auto o asistente
   OUT_GATE = "flow_gate_9",        -- nil => auto/calibración/asistente
   IN_GATE  = "flow_gate_4",        -- nil => auto/calibración/asistente
@@ -52,7 +41,7 @@ local CFG = {
   -- Límites de flujo
   IN_MIN = 0, IN_MAX = 3000000,
   OUT_MIN = 0, OUT_MAX = 10000000,
-  CHARGE_FLOW = 900000,    -- input gate durante carga
+  CHARGE_FLOW = 900000,     -- input gate durante carga
 
   UI_TICK = 0.25,           -- s por ciclo
   DB_FIELD = 1.0,           -- histéresis campo
@@ -61,7 +50,7 @@ local CFG = {
 
   -- Persistencia
   CFG_FILE = "config.lua",  -- guarda el mapeo aquí
-  MODE_OUT = "SAT",         -- "SAT" (por saturación) o "GEN" (por generación)
+  MODE_OUT = "SAT",         -- "SAT" o "GEN"
 }
 
 -- ========= STATE =========
@@ -113,12 +102,10 @@ local function findReactors()
   for _,t in ipairs(types) do
     for _,p in ipairs(listPeriph(t)) do table.insert(out, p) end
   end
-  -- fallback: por método
   for _,name in ipairs(peripheral.getNames()) do
     local p = peripheral.wrap(name)
     if type(p.getReactorInfo)=="function" then table.insert(out, p) end
   end
-  -- dedupe
   local seen = {}; local res = {}
   for _,p in ipairs(out) do if not seen[tostring(p)] then seen[tostring(p)]=true; table.insert(res,p) end end
   return res
@@ -333,28 +320,23 @@ end
 
 -- ========= CONTROL =========
 local function controlTick(info, dt)
-  -- Emergencia: campo bajo
   if info.fieldP <= CFG.FIELD_LOW_TRIP then
     S.action = "EMERG: Field < "..CFG.FIELD_LOW_TRIP.."%"; setAlarm(true)
     reactorCall("stopReactor"); reactorCall("chargeReactor")
     S.inp.set(CFG.CHARGE_FLOW); S.out.set(CFG.OUT_MIN)
     return
   end
-  -- Sobretemperatura
   if info.temp >= CFG.TEMP_MAX then
     S.action = "EMERG: Temp > "..CFG.TEMP_MAX; setAlarm(true)
     reactorCall("stopReactor"); S.out.set(CFG.OUT_MIN)
   end
-  -- Reanudar en frío
   if info.status=="stopping" and info.temp<=CFG.TEMP_SAFE then
     reactorCall("activateReactor"); S.action = "Resume: cool"; setAlarm(false)
   end
-  -- Cargando
   if info.status=="charging" then
     S.inp.set(CFG.CHARGE_FLOW); S.action = "Charging"; return
   end
 
-  -- Input: mantener campo
   if S.autoIn then
     local err = CFG.TARGET_FIELD - info.fieldP; if math.abs(err)<=CFG.DB_FIELD then err=0 end
     S.iErrIn = clamp(S.iErrIn + err*dt, -1000, 1000)
@@ -364,14 +346,12 @@ local function controlTick(info, dt)
     S.setIn = clamp(S.setIn, CFG.IN_MIN, CFG.IN_MAX); S.inp.set(S.setIn)
   end
 
-  -- Output: modo SAT o GEN
   if S.autoOut then
     local err
     if S.modeOut=="SAT" then
       err = CFG.TARGET_SAT - info.satP
       if math.abs(err) <= CFG.DB_SAT then err = 0 end
-    else -- GEN
-      -- Normaliza error de generación como % del objetivo para reutilizar ganancias
+    else
       local target = math.max(1, CFG.TARGET_GEN_RFPT)
       local e = (CFG.TARGET_GEN_RFPT - info.gen) / target * 100
       if math.abs(e) <= (CFG.DB_GEN*100) then e = 0 end
@@ -400,7 +380,6 @@ local function draw(info)
   f.textLR(mon,2,4,"Monitor", S.monName or "?", colors.gray, colors.gray)
   f.textLR(mon,2,6,"Gates", (S.inName or "?").." [IN]  |  "..(S.outName or "?").." [OUT]", colors.gray, colors.cyan)
 
-  -- Botones de cabecera: MODE y SETUP, siempre visibles
   local modeLabel = "MODE:"..S.modeOut
   local modeX = math.max(2, (mx - 10) - (#modeLabel + 2))
   f.button(mon, modeX, 2, modeLabel, colors.blue)
@@ -422,7 +401,6 @@ local function draw(info)
 
   f.textLR(mon,2,my-3,"Action", S.action, colors.gray, colors.gray)
 
-  -- Botonera OUT (fila my-1) e IN (fila my)
   local y1=my-1; local y2=my
   f.button(mon,2,y1,"<<<"); f.button(mon,6,y1,"<<"); f.button(mon,10,y1,"<")
   f.button(mon,14,y1,S.autoOut and "OUT:AU" or "OUT:MA", S.autoOut and colors.green or colors.orange)
@@ -437,15 +415,12 @@ local function handleTouch(x,y)
   local mon=S.mon; local mx,my=mon.getSize()
   local function inRect(cx,cy,label) return x>=cx and x<=cx+#label-1 and y==cy end
 
-  -- SETUP siempre visible
   if inRect(mx-10,2,"SETUP") then setupWizard(); return end
 
-  -- MODE toggle (SAT/GEN)
   local modeLabel = "MODE:"..S.modeOut
   local modeX = math.max(2, (mx - 10) - (#modeLabel + 2))
   if inRect(modeX,2,modeLabel) then S.modeOut = (S.modeOut=="SAT") and "GEN" or "SAT"; return end
 
-  -- OUT manual
   local y1=my-1
   if inRect(2,y1,"<<<") then S.setOut=S.setOut-100000; S.autoOut=false end
   if inRect(6,y1,"<<") then S.setOut=S.setOut-10000;  S.autoOut=false end
@@ -455,7 +430,6 @@ local function handleTouch(x,y)
   if inRect(mx-9,y1,">>") then S.setOut=S.setOut+10000;  S.autoOut=false end
   if inRect(mx-5,y1,">>>") then S.setOut=S.setOut+100000; S.autoOut=false end
 
-  -- IN manual
   local y2=my
   if inRect(2,y2,"<<<") then S.setIn=S.setIn-100000; S.autoIn=false end
   if inRect(6,y2,"<<") then S.setIn=S.setIn-10000;  S.autoIn=false end
@@ -496,4 +470,3 @@ end
 
 local ok, err = pcall(main)
 if not ok then if S.mon then f.clear(S.mon); S.mon.setCursorPos(2,2); S.mon.write("Error:"); S.mon.setCursorPos(2,3); S.mon.write(err or "unknown") end error(err) end
-
