@@ -1,28 +1,33 @@
--- installer.lua — descarga archivos desde tu GitHub y reinicia
-local RAW_BASE = "https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main"
-local FILES = { "startup.lua", "lib/f.lua" }
+-- installer.lua - reinstala siempre desde GitHub
+local base = "https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/"
 
-local function fetch(url)
+local files = {
+  "startup.lua",
+  "lib/f.lua",
+}
+
+-- Borrar viejos
+print("Limpiando archivos viejos...")
+if fs.exists("startup.lua") then fs.delete("startup.lua") end
+if fs.exists("config.lua") then fs.delete("config.lua") end
+if fs.exists("lib") then fs.delete("lib") end
+fs.makeDir("lib")
+
+-- Descargar nuevos
+for _,file in ipairs(files) do
+  local url = base..file
+  print("Descargando "..file.." ...")
   local h = http.get(url)
-  if not h then error("HTTP get failed: "..url) end
-  local b = h.readAll(); h.close(); return b
+  if not h then
+    print("ERROR al bajar "..file)
+  else
+    local out = fs.open(file,"w")
+    out.write(h.readAll())
+    out.close()
+    h.close()
+    print("OK -> "..file)
+  end
 end
 
-local function save(path, data)
-  local dir = fs.getDir(path)
-  if dir ~= "" then fs.makeDir(dir) end
-  local f = fs.open(path, "w"); f.write(data); f.close()
-end
-
-for _,p in ipairs(FILES) do
-  local url = RAW_BASE.."/"..p
-  print("Downloading ", url)
-  local ok, data = pcall(fetch, url); if not ok then error(data) end
-  save(p, data)
-  -- Compat: algunos scripts aún llaman os.loadAPI("lib/f")
-  if p == "lib/f.lua" then save("lib/f", data) end
-end
-
-print("Done. Rebooting...")
-os.sleep(1)
-os.reboot()
+print("Instalación completa.")
+print("Escribe 'reboot' para reiniciar y arrancar el controlador.")
