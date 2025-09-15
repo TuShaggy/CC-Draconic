@@ -1,9 +1,9 @@
--- ATM10 Draconic Reactor Controller (CC:Tweaked)
--- startup.lua — adaptive layout (small monitor safe)
+-- ATM10 Draconic Reactor Controller — startup.lua (final)
+-- Incluye autodetección, HUD completo, control PI, failsafes
+-- y setup visual con puntero para elegir IN/OUT gates.
 -- Autor: Fabian + ChatGPT
--- Modo no-touch (todo por módem cableado), SETUP siempre visible, modos SAT/GEN
 
--- ===== cargar librería de UI 'f' con compat =====
+-- ===== Helpers =====
 local function load_f()
   if fs.exists("lib/f.lua") then
     local ok, mod = pcall(dofile, "lib/f.lua")
@@ -13,501 +13,239 @@ local function load_f()
     local ok = pcall(os.loadAPI, "lib/f")
     if ok and type(_G.f)=="table" then return _G.f end
   end
-  error("No se pudo cargar la librería 'f' (busqué lib/f.lua y lib/f)")
+  error("No se pudo cargar la librería 'f'")
 end
 local f = load_f()
 
 -- ========= CONFIG =========
 local CFG = {
-  REACTOR = "draconic_reactor_1",
-  OUT_GATE = "flow_gate_9",
-  IN_GATE  = "flow_gate_4",
-  MONITOR  = "monitor_5",
-  ALARM_RS_SIDE = nil,
-
+  CFG_FILE = "config.lua",
   TARGET_FIELD = 50.0,
   TARGET_SAT   = 65.0,
   TARGET_GEN_RFPT = 3000000,
   FIELD_LOW_TRIP = 20.0,
   TEMP_MAX = 8000,
   TEMP_SAFE = 3000,
-
   IN_KP = 120000, IN_KI = 20000,
   OUT_KP = 120000, OUT_KI = 30000,
-
   IN_MIN = 0, IN_MAX = 3000000,
   OUT_MIN = 0, OUT_MAX = 10000000,
   CHARGE_FLOW = 900000,
-
   UI_TICK = 0.25,
   DB_FIELD = 1.0,
   DB_SAT = 2.0,
   DB_GEN = 0.02,
-
-  CFG_FILE = "config.lua",
-  MODE_OUT = "SAT",
 }
 
 -- ========= STATE =========
 local S = {
-  mon = nil, rx = nil, out = nil, inp = nil,
+  mon=nil, rx=nil, out=nil, inp=nil,
   monName=nil, rxName=nil, outName=nil, inName=nil,
-  autoIn = true, autoOut = true,
-  setIn = 220000, setOut = 500000,
-  iErrIn = 0, iErrOut = 0,
-  lastT = os.clock(),
-  action = "Boot",
-  alarm = false,
-  setupMode = false,
-  modeOut = CFG.MODE_OUT,
+  autoIn=true, autoOut=true,
+  setIn=220000, setOut=500000,
+  iErrIn=0, iErrOut=0,
+  lastT=os.clock(),
+  action="Boot",
+  alarm=false,
+  modeOut="SAT",
 }
 
--- ========= PERSISTENCE =========
+-- ========= Persistencia =========
 local function saveTbl(path, tbl)
-  local h = fs.open(path, "w"); h.write("return "..textutils.serialize(tbl)); h.close()
-end
+  local h=fs.open(path,"w"); h.write("return "..textutils.serialize(tbl)); h.close() end
 local function loadTbl(path)
   if not fs.exists(path) then return nil end
-  local ok, t = pcall(dofile, path)
-  if ok and type(t)=="table" then return t end
-  return nil
+  local ok,t=pcall(dofile,path); if ok and type(t)=="table" then return t end end
+
+-- ========= Descubrimiento =========
+local function detect()
+  local names=peripheral.getNames()
+  local reactor,monitor
+  for _,n in ipairs(names) do if n:find("draconic_reactor") then reactor=n end end
+  for _,n in ipairs(names) do if n:find("monitor") then monitor=n end end
+  local gates={}
+  for _,n in ipairs(names) do if n:find("flow_gate") then table.insert(gates,n) end end
+  return reactor, monitor, gates
 end
 
--- ========= DISCOVERY =========
-local function listPeriph(t)
-  local arr = { peripheral.find(t) }; return arr
-end
-
-local function pickMonitor()
-  if CFG.MONITOR then S.monName = CFG.MONITOR; return peripheral.wrap(CFG.MONITOR) end
-  local mons = listPeriph("monitor")
-  if #mons == 0 then return nil end
-  table.sort(mons, function(a,b)
-    local ax,ay=a.getSize(); local bx,by=b.getSize(); return ax*ay>bx*by end)
-  for _,name in ipairs(peripheral.getNames()) do
-    local p=peripheral.wrap(name); if p==mons[1] then S.monName=name; break end
-  end
-  return mons[1]
-end
-
-local function findReactors()
-  local out = {}
-  local types = {"draconic_reactor","reactor","advancedperipherals:reactor"}
-  for _,t in ipairs(types) do for _,p in ipairs(listPeriph(t)) do table.insert(out, p) end end
-  for _,name in ipairs(peripheral.getNames()) do
-    local p = peripheral.wrap(name)
-    if type(p.getReactorInfo)=="function" then table.insert(out, p) end
-  end
-  local seen = {}; local res = {}
-  for _,p in ipairs(out) do if not seen[tostring(p)] then seen[tostring(p)]=true; table.insert(res,p) end end
-  return res
-end
-
-local function isFluxGate(p)
-  if not p then return false end
-  if type(p.getSignalLowFlow)=="function" and type(p.setSignalLowFlow)=="function" then return true end
-  if type(p.getFlow)=="function" and (type(p.setFlow)=="function" or type(p.setFlowOverride)=="function") then return true end
-  return false
-end
-
-local function findFluxGates()
-  local gates = {}
-  for _,name in ipairs(peripheral.getNames()) do
-    local p = peripheral.wrap(name)
-    if isFluxGate(p) then table.insert(gates, {name=name, p=p}) end
-  end
-  return gates
-end
-
-local function wrapFluxSetter(p)
-  local api = {}
-  if type(p.getSignalLowFlow)=="function" then
-    api.get=function() return p.getSignalLowFlow() end
-    api.set=function(v) return p.setSignalLowFlow(math.max(0, math.floor(v))) end
-  else
-    api.get=function() return p.getFlow() end
-    local setter=p.setFlow or p.setFlowOverride
-    api.set=function(v) return setter(math.max(0, math.floor(v))) end
-  end
-  api.raw=p; return api
-end
-
-local function nameOf(wrapped)
-  for _,n in ipairs(peripheral.getNames()) do if peripheral.wrap(n)==wrapped then return n end end
-  return nil
-end
-
--- ========= REACTOR INFO =========
+-- ========= Reactor Info =========
 local function pct(n,d) if not n or not d or d==0 then return 0 end return (n/d)*100 end
 local function rxInfo()
   local ok, info = pcall(S.rx.getReactorInfo)
   if not ok or not info then return nil end
   local t = {
     status = info.status or info.state or "unknown",
-    gen = info.generationRate or info.generation or 0,
-    temp = info.temperature or info.temp or 0,
-    es = info.energySaturation or info.energy or 0,
-    esMax = info.maxEnergySaturation or info.maxEnergy or 1,
-    fs = info.fieldStrength or info.field or 0,
-    fsMax = info.maxFieldStrength or info.maxField or 1,
-    fc = info.fuelConversion or info.converted or 0,
-    fcMax = info.maxFuelConversion or info.maxConverted or 1,
-    fieldDrain = info.fieldDrain or info.fieldLoadRate or nil,
+    gen = info.generationRate or 0,
+    temp = info.temperature or 0,
+    es = info.energySaturation or 0,
+    esMax = info.maxEnergySaturation or 1,
+    fs = info.fieldStrength or 0,
+    fsMax = info.maxFieldStrength or 1,
+    fc = info.fuelConversion or 0,
+    fcMax = info.maxFuelConversion or 1,
   }
-  t.satP = pct(t.es, t.esMax); t.fieldP = pct(t.fs, t.fsMax); t.fuelP = 100 - pct(t.fc, t.fcMax)
+  t.satP = pct(t.es,t.esMax)
+  t.fieldP = pct(t.fs,t.fsMax)
   return t
 end
 
-local function reactorCall(name)
-  if type(S.rx[name])=="function" then local ok,res=pcall(S.rx[name]); return ok and res or false end
-  return false
-end
-
--- ========= UTILS =========
-local function clamp(v, lo, hi) if v<lo then return lo elseif v>hi then return hi else return v end end
-local function setAlarm(on) if CFG.ALARM_RS_SIDE then redstone.setOutput(CFG.ALARM_RS_SIDE, on) end S.alarm=on end
-
--- ========= CALIBRATION =========
-local function calibrateRoles(_, _, gates)
-  local info = rxInfo(); if not info then return nil end
-  if info.status ~= "online" and info.status ~= "charged" then return nil end
-  if #gates ~= 2 then return nil end
-
-  local oldAutoIn, oldAutoOut = S.autoIn, S.autoOut
-  S.autoIn=false; S.autoOut=false
-  local g1, g2 = gates[1], gates[2]
-  local g1w, g2w = wrapFluxSetter(g1.p), wrapFluxSetter(g2.p)
-  local s1o, s2o = g1w.get(), g2w.get()
-
-  local function measureDelta(fn)
-    local i0 = rxInfo(); sleep(0.6); fn(); sleep(1.0); local i1 = rxInfo(); return i0, i1 end
-
-  local step = 20000
-  local i0, i1 = measureDelta(function() g1w.set(s1o + step) end)
-  g1w.set(s1o)
-  local df_field1 = (i1.fieldP - i0.fieldP)
-  local df_sat1   = (i1.satP - i0.satP)
-
-  local j0, j1 = measureDelta(function() g2w.set(s2o + step) end)
-  g2w.set(s2o)
-  local df_field2 = (j1.fieldP - j0.fieldP)
-  local df_sat2   = (j1.satP - j0.satP)
-
-  local input, output
-  if df_field1 > 0.05 and df_sat1 > -0.1 then input=g1; output=g2 end
-  if df_field2 > 0.05 and df_sat2 > -0.1 then input=g2; output=g1 end
-
-  S.autoIn=oldAutoIn; S.autoOut=oldAutoOut
-  if input and output then return input.name, output.name end
-  return nil
-end
-
--- ========= DISCOVER + SETUP =========
-local function applyMapping(map)
-  S.rx = peripheral.wrap(map.reactor); S.rxName = map.reactor
-  S.mon = peripheral.wrap(map.monitor); S.monName = map.monitor
-  S.inp = wrapFluxSetter(peripheral.wrap(map.in_gate)); S.inName = map.in_gate
-  S.out = wrapFluxSetter(peripheral.wrap(map.out_gate)); S.outName = map.out_gate
-end
-
-local function drawSetup(state)
-  local mon=S.mon; local mx,my=mon.getSize(); f.clear(mon); mon.setTextScale(0.5)
-  f.textLR(mon,2,2,"SETUP — asigna periféricos", "", colors.white, colors.white)
-  mon.setCursorPos(2,4); mon.write("Reactor:")
-  f.button(mon, 12,4, state.rxList[state.rxIdx] or "—")
-  mon.setCursorPos(2,6); mon.write("Monitor:")
-  f.button(mon, 12,6, state.monList[state.monIdx] or "—")
-  mon.setCursorPos(2,8); mon.write("Input Gate:")
-  f.button(mon, 12,8, state.gateList[state.inIdx] and state.gateList[state.inIdx].name or "—")
-  mon.setCursorPos(2,10); mon.write("Output Gate:")
-  f.button(mon, 12,10, state.gateList[state.outIdx] and state.gateList[state.outIdx].name or "—")
-
-  f.button(mon, 2, my-3, "Auto-calibrar (si online)", colors.green)
-  f.button(mon, math.max(2, mx-16), my-1, "Guardar & Iniciar", colors.blue)
-  f.button(mon, 2, my-1, "Refrescar", colors.gray)
-end
-
-local function setupWizard()
-  S.setupMode=true
-  local reactors = {}
-  for _,p in ipairs(findReactors()) do table.insert(reactors, nameOf(p)) end
-  local mons = {}
-  for _,n in ipairs(peripheral.getNames()) do if peripheral.getType(n)=="monitor" then table.insert(mons,n) end end
-  local gates = findFluxGates()
-
-  if #mons==0 then error("No hay monitores conectados por módem.") end
-  if #gates<2 then error("Se requieren al menos 2 flux gates en la red.") end
-  if #reactors==0 then error("No se detecta reactor por módem (stabilizer).") end
-
-  local st = { rxList=reactors, monList=mons, gateList=gates, rxIdx=1, monIdx=1, inIdx=1, outIdx=2 }
-  drawSetup(st)
-
-  while true do
-    local ev,side,x,y=os.pullEvent("monitor_touch")
-    local mx,my=S.mon.getSize()
-    local function inRect(cx,cy,label) return x>=cx and x<=cx+#label-1 and y==cy end
-
-    if inRect(12,4, st.rxList[st.rxIdx] or "—") then st.rxIdx = st.rxIdx % #st.rxList + 1; drawSetup(st) end
-    if inRect(12,6, st.monList[st.monIdx] or "—") then st.monIdx = st.monIdx % #st.monList + 1; drawSetup(st) end
-    if inRect(12,8, (st.gateList[st.inIdx] and st.gateList[st.inIdx].name) or "—") then st.inIdx = st.inIdx % #st.gateList + 1; drawSetup(st) end
-    if inRect(12,10,(st.gateList[st.outIdx] and st.gateList[st.outIdx].name) or "—") then st.outIdx = st.outIdx % #st.gateList + 1; drawSetup(st) end
-
-    if inRect(2, my-3, "Auto-calibrar (si online)") then
-      local map = {reactor=st.rxList[st.rxIdx], monitor=st.monList[st.monIdx]}
-      S.rx = peripheral.wrap(map.reactor); S.mon = peripheral.wrap(map.monitor)
-      local pair = {st.gateList[1], st.gateList[2]}
-      if #pair==2 then
-        local inName, outName = calibrateRoles(nil,nil, pair)
-        if inName and outName then st.inIdx = (inName==pair[1].name) and 1 or 2; st.outIdx = (outName==pair[1].name) and 1 or 2 end
-      end
-      drawSetup(st)
-    end
-
-    if inRect(2, my-1, "Refrescar") then return setupWizard() end
-    if inRect(math.max(2, mx-16), my-1, "Guardar & Iniciar") then
-      if st.inIdx~=st.outIdx then
-        local map = {reactor=st.rxList[st.rxIdx], monitor=st.monList[st.monIdx], in_gate=st.gateList[st.inIdx].name, out_gate=st.gateList[st.outIdx].name}
-        saveTbl(CFG.CFG_FILE, map)
-        applyMapping(map)
-        S.setupMode=false
-        return
-      end
-    end
-  end
-end
-
-local function discover()
-  local persisted = loadTbl(CFG.CFG_FILE)
-  if persisted and peripheral.wrap(persisted.reactor) and peripheral.wrap(persisted.monitor)
-     and peripheral.wrap(persisted.in_gate) and peripheral.wrap(persisted.out_gate) then
-    applyMapping(persisted)
+-- ========= Flux wrapper =========
+local function wrapFluxSetter(p)
+  local api={}
+  if type(p.getSignalLowFlow)=="function" then
+    api.get=function() return p.getSignalLowFlow() end
+    api.set=function(v) return p.setSignalLowFlow(math.max(0,math.floor(v))) end
   else
-    S.mon = pickMonitor(); if not S.mon then error("Sin monitor (con módem)") end
-    local rxs = findReactors(); if #rxs==0 then error("Sin reactor por módem (stabilizer)") end
-    S.rx = rxs[1]; S.rxName = nameOf(S.rx)
-    local gates = findFluxGates(); if #gates<2 then error("Se necesitan 2 flux gates") end
+    api.get=function() return p.getFlow() end
+    local setter=p.setFlow or p.setFlowOverride
+    api.set=function(v) return setter(math.max(0,math.floor(v))) end
+  end
+  api.raw=p; return api
+end
 
-    if #gates==2 then
-      local inName, outName = calibrateRoles(nil,nil, gates)
-      if not inName then S.setupMode = true else
-        local map = {reactor=S.rxName, monitor=S.monName or nameOf(S.mon), in_gate=inName, out_gate=outName}
-        saveTbl(CFG.CFG_FILE, map); applyMapping(map)
-      end
-    else
-      setupWizard()
+-- ========= Setup visual =========
+local function setupWizard()
+  local reactor,monitor,gates=detect()
+  if not reactor then error("No se detecta reactor (draconic_reactor_*)") end
+  if not monitor then error("No se detecta monitor (monitor_*)") end
+  if #gates<2 then error("No se detectan al menos 2 flow_gate_*") end
+
+  local sel={rx=reactor, mon=monitor, inIdx=1, outIdx=2}
+  local monP=peripheral.wrap(monitor)
+  local monW,monH=monP.getSize()
+
+  local function draw()
+    f.clear(monP); monP.setTextScale(0.5)
+    monP.setCursorPos(2,2); monP.write("SETUP VISUAL — Selecciona periféricos")
+
+    monP.setCursorPos(2,4); monP.write("Reactor: "..(sel.rx or "?"))
+    monP.setCursorPos(2,6); monP.write("Monitor: "..(sel.mon or "?"))
+
+    monP.setCursorPos(2,8); monP.write("Input Gate (IN):")
+    for i,n in ipairs(gates) do
+      monP.setCursorPos(4,9+i)
+      if i==sel.inIdx then
+        monP.setBackgroundColor(colors.blue); monP.write("> "..n.." <"); monP.setBackgroundColor(colors.black)
+      else monP.write("  "..n) end
     end
+
+    monP.setCursorPos(2,12+#gates); monP.write("Output Gate (OUT):")
+    for i,n in ipairs(gates) do
+      monP.setCursorPos(4,13+#gates+i)
+      if i==sel.outIdx then
+        monP.setBackgroundColor(colors.blue); monP.write("> "..n.." <"); monP.setBackgroundColor(colors.black)
+      else monP.write("  "..n) end
+    end
+
+    f.button(monP,2,monH-4,"Autocalibrar",colors.orange)
+    f.button(monP,2,monH-2,"Guardar & Iniciar",colors.green)
+    f.button(monP,monW-10,monH-2,"Cancelar",colors.red)
   end
 
-  if not S.inp or not S.out then
-    S.inp = wrapFluxSetter(peripheral.wrap(S.inName))
-    S.out = wrapFluxSetter(peripheral.wrap(S.outName))
+  draw()
+  while true do
+    local ev,_,x,y=os.pullEvent("monitor_touch")
+    for i,_ in ipairs(gates) do
+      if y==9+i then sel.inIdx=i; draw() end
+      if y==13+#gates+i then sel.outIdx=i; draw() end
+    end
+    if y==monH-4 and x>=2 and x<=17 and #gates==2 then
+      sel.inIdx=1; sel.outIdx=2; draw()
+    end
+    if y==monH-2 and x>=2 and x<=17 then
+      if sel.inIdx==sel.outIdx then
+        monP.setCursorPos(2,monH-1); monP.write("IN y OUT no pueden ser iguales")
+      else
+        local map={reactor=sel.rx, monitor=sel.mon, in_gate=gates[sel.inIdx], out_gate=gates[sel.outIdx]}
+        saveTbl(CFG.CFG_FILE,map)
+        return map
+      end
+    end
+    if y==monH-2 and x>=monW-10 then error("Setup cancelado") end
   end
 end
 
--- ========= CONTROL =========
+-- ========= Discover =========
+local function discover()
+  local map=loadTbl(CFG.CFG_FILE)
+  local rx,mon,gates=detect()
+  if not rx or not mon or #gates<2 then return setupWizard() end
+  if not map then
+    if #gates==2 then
+      map={reactor=rx, monitor=mon, in_gate=gates[1], out_gate=gates[2]}
+      saveTbl(CFG.CFG_FILE,map)
+    else
+      map=setupWizard()
+    end
+  end
+  return map
+end
+
+-- ========= Control =========
+local function clamp(v,lo,hi) if v<lo then return lo elseif v>hi then return hi else return v end end
+
 local function controlTick(info, dt)
   if info.fieldP <= CFG.FIELD_LOW_TRIP then
-    S.action = "EMERG: Field < "..CFG.FIELD_LOW_TRIP.."%"; setAlarm(true)
-    reactorCall("stopReactor"); reactorCall("chargeReactor")
-    S.inp.set(CFG.CHARGE_FLOW); S.out.set(CFG.OUT_MIN)
+    S.action="EMERG: Field low"; S.inp.set(CFG.CHARGE_FLOW); S.out.set(CFG.OUT_MIN)
     return
   end
   if info.temp >= CFG.TEMP_MAX then
-    S.action = "EMERG: Temp > "..CFG.TEMP_MAX; setAlarm(true)
-    reactorCall("stopReactor"); S.out.set(CFG.OUT_MIN)
-  end
-  if info.status=="stopping" and info.temp<=CFG.TEMP_SAFE then
-    reactorCall("activateReactor"); S.action = "Resume: cool"; setAlarm(false)
-  end
-  if info.status=="charging" then
-    S.inp.set(CFG.CHARGE_FLOW); S.action = "Charging"; return
+    S.action="EMERG: Temp high"; S.out.set(CFG.OUT_MIN); return
   end
 
   if S.autoIn then
-    local err = CFG.TARGET_FIELD - info.fieldP; if math.abs(err)<=CFG.DB_FIELD then err=0 end
-    S.iErrIn = clamp(S.iErrIn + err*dt, -1000, 1000)
-    S.setIn = clamp(S.setIn + (CFG.IN_KP*err + CFG.IN_KI*S.iErrIn)*dt, CFG.IN_MIN, CFG.IN_MAX)
+    local err = CFG.TARGET_FIELD - info.fieldP
+    if math.abs(err)<=CFG.DB_FIELD then err=0 end
+    S.iErrIn = clamp(S.iErrIn + err*dt,-1000,1000)
+    S.setIn = clamp(S.setIn + (CFG.IN_KP*err + CFG.IN_KI*S.iErrIn)*dt,CFG.IN_MIN,CFG.IN_MAX)
     S.inp.set(S.setIn)
-  else
-    S.setIn = clamp(S.setIn, CFG.IN_MIN, CFG.IN_MAX); S.inp.set(S.setIn)
   end
 
   if S.autoOut then
     local err
     if S.modeOut=="SAT" then
-      err = CFG.TARGET_SAT - info.satP
-      if math.abs(err) <= CFG.DB_SAT then err = 0 end
+      err=CFG.TARGET_SAT-info.satP; if math.abs(err)<=CFG.DB_SAT then err=0 end
     else
-      local target = math.max(1, CFG.TARGET_GEN_RFPT)
-      local e = (CFG.TARGET_GEN_RFPT - info.gen) / target * 100
-      if math.abs(e) <= (CFG.DB_GEN*100) then e = 0 end
-      err = e
+      local e=(CFG.TARGET_GEN_RFPT-info.gen)/CFG.TARGET_GEN_RFPT*100
+      if math.abs(e)<=CFG.DB_GEN*100 then e=0 end
+      err=e
     end
-    S.iErrOut = clamp(S.iErrOut + err*dt, -1000, 1000)
-    S.setOut = clamp(S.setOut + (CFG.OUT_KP*err + CFG.OUT_KI*S.iErrOut)*dt, CFG.OUT_MIN, CFG.OUT_MAX)
-    if info.temp > 7000 then S.setOut = S.setOut * 0.7 end
+    S.iErrOut=clamp(S.iErrOut+err*dt,-1000,1000)
+    S.setOut=clamp(S.setOut+(CFG.OUT_KP*err+CFG.OUT_KI*S.iErrOut)*dt,CFG.OUT_MIN,CFG.OUT_MAX)
     S.out.set(S.setOut)
-  else
-    S.setOut = clamp(S.setOut, CFG.OUT_MIN, CFG.OUT_MAX); S.out.set(S.setOut)
   end
 
-  S.action = (S.autoIn and "AU" or "MA").." IN="..f.si(S.setIn).."  "..(S.autoOut and "AU" or "MA").." OUT="..f.si(S.setOut)
-  setAlarm(false)
+  S.action="IN="..f.si(S.setIn).." OUT="..f.si(S.setOut)
 end
 
 -- ========= UI =========
 local function draw(info)
-  local mon=S.mon; mon.setTextScale(0.5); local mx,my=mon.getSize(); f.clear(mon)
-
-  local function clampX(x,label)
-    local maxX = math.max(1, mx - #label - 1)
-    if x < 1 then x = 1 end
-    if x > maxX then x = maxX end
-    return x
-  end
-  local function row(y) return (y <= my) and y or my end
-
-  -- Minimal UI si pantalla pequeña
-  if mx < 24 or my < 12 then
-    local infoStatus = info and (info.status or "?") or "?"
-    f.textLR(mon, 2, row(2), "Draconic Reactor", string.upper(infoStatus), colors.white, colors.lime)
-    f.textLR(mon, 2, row(4), "Gen", info and (f.format_int(info.gen).." RF/t") or "?", colors.white, colors.white)
-    f.textLR(mon, 2, row(6), "Temp", info and (f.format_int(info.temp).." C") or "?", colors.white, colors.white)
-    f.textLR(mon, 2, row(8), "Action", S.action, colors.gray, colors.gray)
-    if my >= 3 then
-      local y1 = my-1; local y2 = my
-      if y1 >= 1 then
-        local lab = S.autoOut and "OUT:AU" or "OUT:MA"
-        f.button(mon, clampX(2, lab), y1, lab, S.autoOut and colors.green or colors.orange)
-      end
-      if y2 >= 1 then
-        local lab = S.autoIn and "IN:AU" or "IN:MA"
-        f.button(mon, clampX(2, lab), y2, lab, S.autoIn and colors.green or colors.orange)
-      end
-    end
-    return
-  end
-
-  local statusColor=colors.red
-  if info.status=="online" or info.status=="charged" then statusColor=colors.lime
-  elseif info.status=="offline" then statusColor=colors.gray elseif info.status=="charging" then statusColor=colors.orange end
-
-  f.textLR(mon,2,2,"Reactor ("..(S.rxName or "?")..")", string.upper(info.status), colors.white, statusColor)
-  f.textLR(mon,2,4,"Monitor", S.monName or "?", colors.gray, colors.gray)
-  f.textLR(mon,2,6,"Gates", (S.inName or "?").." [IN]  |  "..(S.outName or "?").." [OUT]", colors.gray, colors.cyan)
-
-  local setupLabel = "SETUP"
-  local setupX = clampX(mx - #setupLabel - 1, setupLabel)
-  f.button(mon, setupX, 2, setupLabel, colors.orange)
-
-  local modeLabel = "MODE:"..S.modeOut
-  local modeX = clampX(setupX - (#modeLabel + 2), modeLabel)
-  f.button(mon, modeX, 2, modeLabel, colors.blue)
-
-  f.textLR(mon,2,8,"Generation", f.format_int(info.gen).." RF/t", colors.white, colors.lime)
-  local tcol=colors.red; if info.temp<5000 then tcol=colors.lime elseif info.temp<6500 then tcol=colors.orange end
-  f.textLR(mon,2,10,"Temperature", f.format_int(info.temp).." C", colors.white, tcol)
-
-  f.textLR(mon,2,12,"Output Gate", f.format_int(S.out.get()).." RF/t", colors.white, colors.cyan)
-  f.textLR(mon,2,13,"Input Gate",  f.format_int(S.inp.get()).." RF/t", colors.white, colors.cyan)
-
-  local barW = math.max(10, mx-2)
-  f.textLR(mon,2,15,"Energy Saturation", string.format("%.2f%%", info.satP), colors.white, colors.white)
-  f.bar(mon,2,16,barW,info.satP,100,colors.blue)
-
-  local fcol=colors.red; if info.fieldP>=50 then fcol=colors.lime elseif info.fieldP>30 then fcol=colors.orange end
-  f.textLR(mon,2,18,(S.autoIn and ("Field Strength T:"..CFG.TARGET_FIELD) or "Field Strength"), string.format("%.2f%%", info.fieldP), colors.white, fcol)
-  f.bar(mon,2,19,barW,info.fieldP,100,fcol)
-
-  local ya = my-3; if ya < 20 then ya = 20 end
-  if ya <= my then f.textLR(mon,2,ya,"Action", S.action, colors.gray, colors.gray) end
-
-  local y1=my-1; local y2=my
-  if y1 >= 1 then
-    f.button(mon,math.max(1,2),y1,"<<<"); f.button(mon,math.max(1,6),y1,"<<"); f.button(mon,math.max(1,10),y1,"<")
-    f.button(mon,math.max(1,14),y1,S.autoOut and "OUT:AU" or "OUT:MA", S.autoOut and colors.green or colors.orange)
-    f.button(mon,clampX(mx-13,">") ,y1,">")
-    f.button(mon,clampX(mx-9,">>") ,y1,">>")
-    f.button(mon,clampX(mx-5,">>>"),y1,">>>")
-  end
-  if y2 >= 1 then
-    f.button(mon,math.max(1,2),y2,"<<<"); f.button(mon,math.max(1,6),y2,"<<"); f.button(mon,math.max(1,10),y2,"<")
-    f.button(mon,math.max(1,14),y2,S.autoIn and "IN:AU" or "IN:MA", S.autoIn and colors.green or colors.orange)
-    f.button(mon,clampX(mx-13,">") ,y2,">")
-    f.button(mon,clampX(mx-9,">>") ,y2,">>")
-    f.button(mon,clampX(mx-5,">>>"),y2,">>>")
-  end
+  local mon=S.mon; f.clear(mon)
+  f.textLR(mon,2,2,"Reactor ("..(S.rxName or "?")..")",string.upper(info.status),colors.white,colors.lime)
+  f.textLR(mon,2,4,"Gen",f.format_int(info.gen).." RF/t",colors.white,colors.white)
+  f.textLR(mon,2,6,"Temp",f.format_int(info.temp).." C",colors.white,colors.red)
+  f.textLR(mon,2,8,"Action",S.action,colors.gray,colors.gray)
 end
 
-local function handleTouch(x,y)
-  local mon=S.mon; local mx,my=mon.getSize()
-  local function inRect(cx,cy,label)
-    if cx < 1 then cx = 1 end
-    local maxX = math.max(1, mx - #label - 1)
-    if cx > maxX then cx = maxX end
-    return x>=cx and x<=cx+#label-1 and y==cy
-  end
-
-  local setupLabel = "SETUP"
-  local setupX = math.max(1, mx - #setupLabel - 1)
-  if inRect(setupX,2,setupLabel) then setupWizard(); return end
-
-  local modeLabel = "MODE:"..S.modeOut
-  local modeX = math.max(1, setupX - (#modeLabel + 2))
-  if inRect(modeX,2,modeLabel) then S.modeOut = (S.modeOut=="SAT") and "GEN" or "SAT"; return end
-
-  if my < 3 then return end
-
-  local y1=my-1
-  if y1 >= 1 then
-    if inRect(2,y1,"<<<") then S.setOut=S.setOut-100000; S.autoOut=false end
-    if inRect(6,y1,"<<") then S.setOut=S.setOut-10000;  S.autoOut=false end
-    if inRect(10,y1,"<") then S.setOut=S.setOut-1000;   S.autoOut=false end
-    if inRect(14,y1,S.autoOut and "OUT:AU" or "OUT:MA") then S.autoOut=not S.autoOut end
-    if inRect(mx-13,y1,">") then S.setOut=S.setOut+1000;   S.autoOut=false end
-    if inRect(mx-9,y1,">>") then S.setOut=S.setOut+10000;  S.autoOut=false end
-    if inRect(mx-5,y1,">>>") then S.setOut=S.setOut+100000; S.autoOut=false end
-  end
-
-  local y2=my
-  if y2 >= 1 then
-    if inRect(2,y2,"<<<") then S.setIn=S.setIn-100000; S.autoIn=false end
-    if inRect(6,y2,"<<") then S.setIn=S.setIn-10000;  S.autoIn=false end
-    if inRect(10,y2,"<") then S.setIn=S.setIn-1000;   S.autoIn=false end
-    if inRect(14,y2,S.autoIn and "IN:AU" or "IN:MA") then S.autoIn=not S.autoIn end
-    if inRect(mx-13,y2,">") then S.setIn=S.setIn+1000;   S.autoIn=false end
-    if inRect(mx-9,y2,">>") then S.setIn=S.setIn+10000;  S.autoIn=false end
-    if inRect(mx-5,y2,">>>") then S.setIn=S.setIn+100000; S.autoIn=false end
-  end
-end
-
--- ========= LOOPS =========
+-- ========= Loops =========
 local function uiLoop()
-  while true do
-    local ev, side, x, y = os.pullEvent()
-    if ev=="monitor_touch" then handleTouch(x,y) end
-  end
-end
-
+  while true do local ev,_,x,y=os.pullEvent("monitor_touch") end end
 local function tickLoop()
   while true do
     local now=os.clock(); local dt=now-S.lastT; S.lastT=now
-    local info=rxInfo(); if not info then S.action="Reactor info error" else controlTick(info,dt); draw(info) end
+    local info=rxInfo(); if info then controlTick(info,dt); draw(info) end
     sleep(CFG.UI_TICK)
   end
 end
 
+-- ========= MAIN =========
 local function main()
-  term.clear(); term.setCursorPos(1,1); print("ATM10 Draconic Reactor Controller — starting...")
-  S.mon = pickMonitor(); if not S.mon then error("Conecta un monitor por módem") end
-  discover()
-  print("Periféricos:")
-  print("  Reactor:", S.rxName)
-  print("  Monitor:", S.monName)
-  print("  IN gate:", S.inName)
-  print("  OUT gate:", S.outName)
-  parallel.waitForAny(tickLoop, uiLoop)
+  local map=discover()
+  S.rx=peripheral.wrap(map.reactor); S.rxName=map.reactor
+  S.mon=peripheral.wrap(map.monitor); S.monName=map.monitor
+  S.inp=wrapFluxSetter(peripheral.wrap(map.in_gate)); S.inName=map.in_gate
+  S.out=wrapFluxSetter(peripheral.wrap(map.out_gate)); S.outName=map.out_gate
+  parallel.waitForAny(tickLoop,uiLoop)
 end
 
-local ok, err = pcall(main)
-if not ok then if S.mon then f.clear(S.mon); S.mon.setCursorPos(2,2); S.mon.write("Error:"); S.mon.setCursorPos(2,3); S.mon.write(err or "unknown") end error(err) end
+main()
