@@ -22,6 +22,10 @@ Design goals
 ]]
 
 
+---------------------------
+-- FILE: startup.lua
+---------------------------
+
 local f = dofile("lib/f.lua")
 
 -- ========= CONFIG =========
@@ -36,7 +40,7 @@ local CFG = {
   -- Targets & thresholds
   TARGET_FIELD = 50.0,      -- % objetivo de campo
   TARGET_SAT   = 65.0,      -- % objetivo de saturación (modo SAT)
-  TARGET_GEN_RFPT = 3_000_000, -- RF/t objetivo (modo GEN)
+  TARGET_GEN_RFPT = 3000000, -- RF/t objetivo (modo GEN)
   FIELD_LOW_TRIP = 20.0,    -- % emergencia si baja de esto
   TEMP_MAX = 8000,          -- C
   TEMP_SAFE = 3000,         -- C (reanudar por debajo)
@@ -46,9 +50,9 @@ local CFG = {
   OUT_KP = 120000, OUT_KI = 30000,
 
   -- Límites de flujo
-  IN_MIN = 0, IN_MAX = 3_000_000,
-  OUT_MIN = 0, OUT_MAX = 10_000_000,
-  CHARGE_FLOW = 900_000,    -- input gate durante carga
+  IN_MIN = 0, IN_MAX = 3000000,
+  OUT_MIN = 0, OUT_MAX = 10000000,
+  CHARGE_FLOW = 900000,    -- input gate durante carga
 
   UI_TICK = 0.25,           -- s por ciclo
   DB_FIELD = 1.0,           -- histéresis campo
@@ -492,3 +496,4 @@ end
 
 local ok, err = pcall(main)
 if not ok then if S.mon then f.clear(S.mon); S.mon.setCursorPos(2,2); S.mon.write("Error:"); S.mon.setCursorPos(2,3); S.mon.write(err or "unknown") end error(err) end
+
