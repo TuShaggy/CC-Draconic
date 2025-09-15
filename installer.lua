@@ -1,6 +1,28 @@
--- ATM10 Draconic Reactor Controller — HUD rediseñado + botones funcionales
+-- ATM10 Draconic Reactor Controller — Auto-update + HUD nuevo + Setup
 
--- Helpers
+-- ===== AUTO-UPDATE =====
+local REPO = "https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/"
+local FILES = {"startup.lua"}
+
+local function updateFromGit()
+  for _,file in ipairs(FILES) do
+    local url = REPO..file
+    local h = http.get(url)
+    if h then
+      local f = fs.open(file,"w")
+      f.write(h.readAll())
+      f.close()
+      h.close()
+      print("Actualizado "..file.." desde GitHub.")
+    else
+      print("No se pudo actualizar "..file.." (sin internet?)")
+    end
+  end
+end
+
+updateFromGit()
+
+-- ===== HELPERS =====
 local function load_f()
   if fs.exists("lib/f.lua") then
     local ok, mod = pcall(dofile, "lib/f.lua")
@@ -14,52 +36,75 @@ local function load_f()
 end
 local f = load_f()
 
--- CONFIG
+-- ===== STATE =====
 local CFG = { UI_TICK=0.25, HIST_SIZE=40 }
-local S = {
-  mon=nil, rx=nil,
-  modeOut="SAT", view="DASH",
-  histSAT={}, histField={}, histTemp={},
-  buttons={}
-}
+local S = { mon=nil, rx=nil, inp=nil, out=nil, modeOut="SAT", view="DASH", buttons={} }
 
--- Utils
+-- ===== SETUP =====
+local function setup()
+  local names=peripheral.getNames()
+  local reactors,mons,gates={}, {}, {}
+  for _,n in ipairs(names) do
+    if n:find("draconic_reactor") then reactors[#reactors+1]=n end
+    if n:find("monitor") then mons[#mons+1]=n end
+    if n:find("flow_gate") then gates[#gates+1]=n end
+  end
+
+  local function choose(list,label)
+    print("Selecciona "..label..":")
+    for i,n in ipairs(list) do print(i..") "..n) end
+    local c
+    repeat write("> "); c=tonumber(read()) until c and c>=1 and c<=#list
+    return list[c]
+  end
+
+  local rx=choose(reactors,"reactor")
+  local mon=choose(mons,"monitor")
+  local in_gate=choose(gates,"flux gate IN")
+  local out_gate=choose(gates,"flux gate OUT")
+
+  local cfg={reactor=rx, monitor=mon, in_gate=in_gate, out_gate=out_gate}
+  local f=fs.open("config.lua","w")
+  f.write("return "..textutils.serialize(cfg))
+  f.close()
+  return cfg
+end
+
+local function loadConfig()
+  if fs.exists("config.lua") then return dofile("config.lua") else return setup() end
+end
+
+-- ===== UTILS =====
 local function pct(n,d) if not n or d==0 then return 0 end return (n/d)*100 end
 local function rxInfo()
   local ok, info = pcall(S.rx.getReactorInfo)
   if not ok or not info then return nil end
-  local t={
-    status=info.status, gen=info.generationRate,
-    temp=info.temperature,
+  return {
+    status=info.status or "unknown",
+    gen=info.generationRate or 0,
+    temp=info.temperature or 0,
     satP=pct(info.energySaturation, info.maxEnergySaturation),
-    fieldP=pct(info.fieldStrength, info.maxFieldStrength)
+    fieldP=pct(info.fieldStrength, info.maxFieldStrength),
   }
-  return t
 end
 
--- Dibujar barra horizontal
+-- ===== UI ELEMENTS =====
 local function drawBar(mon,x,y,w,val)
   local filled=math.floor((val/100)*w)
   mon.setCursorPos(x,y)
-  mon.setBackgroundColor(colors.green)
-  if val>90 or val<20 then mon.setBackgroundColor(colors.red)
-  elseif val>80 or val<30 then mon.setBackgroundColor(colors.yellow) end
-  mon.write(string.rep(" ",filled))
-  mon.setBackgroundColor(colors.black)
-  mon.write(string.rep(" ",w-filled))
+  local color=colors.green
+  if val>95 or val<20 then color=colors.red elseif val>85 or val<30 then color=colors.yellow end
+  mon.setBackgroundColor(color); mon.write(string.rep(" ",filled))
+  mon.setBackgroundColor(colors.black); mon.write(string.rep(" ",w-filled))
 end
 
--- Dibujar botón
 local function drawButton(id,x1,y1,x2,y2,label,active)
   local mon=S.mon
   S.buttons[id]={x1=x1,y1=y1,x2=x2,y2=y2}
   for y=y1,y2 do
     mon.setCursorPos(x1,y)
-    if active then
-      mon.setBackgroundColor(colors.orange); mon.setTextColor(colors.black)
-    else
-      mon.setBackgroundColor(colors.gray); mon.setTextColor(colors.white)
-    end
+    if active then mon.setBackgroundColor(colors.orange); mon.setTextColor(colors.black)
+    else mon.setBackgroundColor(colors.gray); mon.setTextColor(colors.white) end
     local pad=math.max(0,(x2-x1+1-#label)//2)
     if y==(y1+y2)//2 then
       mon.write(string.rep(" ",pad)..label..string.rep(" ",(x2-x1+1-#label-pad)))
@@ -70,7 +115,7 @@ local function drawButton(id,x1,y1,x2,y2,label,active)
   mon.setBackgroundColor(colors.black); mon.setTextColor(colors.white)
 end
 
--- DASH view
+-- DASH
 local function drawDash(info)
   local mon=S.mon; mon.setTextScale(1); f.clear(mon)
   local mx,my=mon.getSize()
@@ -84,7 +129,7 @@ local function drawDash(info)
   drawButton("CTRL", mx//2-5, my-2, mx//2+5, my-1, "Controles", false)
 end
 
--- CTRL view
+-- CTRL
 local function drawCtrl(info)
   local mon=S.mon; mon.setTextScale(1); f.clear(mon)
   local mx,my=mon.getSize()
@@ -97,12 +142,9 @@ local function drawCtrl(info)
   drawButton("BACK", mx//2-4, my-2, mx//2+4, my-1, "Volver", false)
 end
 
--- Dibujo
-local function draw(info)
-  if S.view=="DASH" then drawDash(info) else drawCtrl(info) end
-end
+local function draw(info) if S.view=="DASH" then drawDash(info) else drawCtrl(info) end end
 
--- UI Loop
+-- ===== LOOPS =====
 local function uiLoop()
   while true do
     local _,_,x,y=os.pullEvent("monitor_touch")
@@ -116,7 +158,6 @@ local function uiLoop()
   end
 end
 
--- Tick Loop
 local function tickLoop()
   while true do
     local info=rxInfo()
@@ -125,11 +166,13 @@ local function tickLoop()
   end
 end
 
--- MAIN
+-- ===== MAIN =====
 local function main()
-  local map={reactor="draconic_reactor_1", monitor="monitor_5"} -- o detect automático
-  S.rx=peripheral.wrap(map.reactor)
-  S.mon=peripheral.wrap(map.monitor)
+  local cfg=loadConfig()
+  S.rx=peripheral.wrap(cfg.reactor)
+  S.mon=peripheral.wrap(cfg.monitor)
+  S.inp=peripheral.wrap(cfg.in_gate)
+  S.out=peripheral.wrap(cfg.out_gate)
   parallel.waitForAny(tickLoop,uiLoop)
 end
 
