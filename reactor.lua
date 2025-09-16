@@ -1,4 +1,4 @@
--- reactor.lua — lógica de reactor y flux gates
+-- reactor.lua
 local P = dofile("lib/perutils.lua")
 local reactor = {}
 
