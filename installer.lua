@@ -1,30 +1,34 @@
--- installer.lua — instala todos los módulos desde GitHub
+-- installer.lua — descarga todos los archivos necesarios desde GitHub
+
 local repo = "https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/"
 
 local files = {
-  "startup.lua",
-  "reactor.lua",
-  "setup.lua",
-  "ui.lua",
-  "installer.lua",
-  "update.lua",
-  "lib/f.lua",
+  ["startup.lua"]     = repo.."startup.lua",
+  ["reactor.lua"]     = repo.."reactor.lua",
+  ["ui.lua"]          = repo.."ui.lua",
+  ["setup.lua"]       = repo.."setup.lua",
+  ["themes.lua"]      = repo.."themes.lua",
+  ["lib/f.lua"]       = repo.."lib/f.lua",
+  ["lib/perutils.lua"]= repo.."lib/perutils.lua",
 }
 
-for _,file in ipairs(files) do
-  local url = repo..file
-  print("Descargando "..file)
-  local h = http.get(url)
-  if h then
-    local c = h.readAll()
-    h.close()
-    fs.makeDir(fs.getDir(file))
-    local f = fs.open(file, "w")
-    f.write(c)
-    f.close()
-  else
-    print("Fallo al descargar "..file)
+local function ensureDir(path)
+  local dir = fs.getDir(path)
+  if dir ~= "" and not fs.exists(dir) then
+    fs.makeDir(dir)
   end
 end
 
-print("Instalación completa. Ejecuta reboot.")
+for path, url in pairs(files) do
+  print("Descargando "..path.." ...")
+  ensureDir(path)
+  local ok, err = pcall(function()
+    if fs.exists(path) then fs.delete(path) end
+    shell.run("wget", url, path)
+  end)
+  if not ok then
+    print("  ⚠️ Error: "..tostring(err))
+  end
+end
+
+print("✅ Instalación completa. Ejecuta `reboot` para iniciar.")
