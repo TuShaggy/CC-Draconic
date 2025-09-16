@@ -27,8 +27,9 @@ function ui.drawMain(S, reactor)
 end
 
 function ui.handleTouch(S, x, y)
-  -- placeholder: aquí iría el control de menús
-  S.mode = (S.mode == "SAT") and "MAXGEN" or "SAT"
+  -- ejemplo: alternar entre modos
+  if S.mode == "SAT" then S.mode = "MAXGEN"
+  else S.mode = "SAT" end
 end
 
 return ui
