@@ -1,7 +1,7 @@
 -- ATM10 Draconic Reactor Controller — Auto-update + HUD nuevo + Setup
 
 -- ===== AUTO-UPDATE =====
-local REPO = "https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/"
+local REPO = "https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/startup.lua"
 local FILES = {"startup.lua"}
 
 local function updateFromGit()
