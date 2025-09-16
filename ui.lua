@@ -12,13 +12,19 @@ end
 -- ===== Draw button =====
 local function drawButton(S,id,x,y,w,label,active)
   local mon = S.mon
-  local bg,fg = f.getColors(S,active)
-  f.box(mon,x,y,x+w-1,y+2,bg)
-  mon.setTextColor(fg)
-  mon.setCursorPos(x+math.floor((w-#label)/2),y+1)
-  mon.write(label)
-  mon.setTextColor(colors.white)
-  regButton(S,id,x,y,x+w-1,y+2)
+
+  if S.hudTheme == "ascii" then
+    f.drawAsciiButton(mon,x,y,w,5,label,active)
+    regButton(S,id,x,y,x+w-1,y+4)
+  else
+    local bg,fg = f.getColors(S,active)
+    f.box(mon,x,y,x+w-1,y+2,bg)
+    mon.setTextColor(fg)
+    mon.setCursorPos(x+math.floor((w-#label)/2),y+1)
+    mon.write(label)
+    mon.setTextColor(colors.white)
+    regButton(S,id,x,y,x+w-1,y+2)
+  end
 end
 
 -- ===== VIEWS =====
@@ -62,25 +68,34 @@ local function drawCtrl(S)
     drawButton(S,m,x,4,12,m,S.modeOut==m)
     x=x+14
   end
-  drawButton(S,"BACK",2,10,10,"BACK",false)
+  drawButton(S,"BACK",2,12,10,"BACK",false)
 end
 
 local function drawHUD(S)
   local mon=S.mon; f.clear(mon,S.hudTheme); S.buttons={}
   f.center(mon,1,"HUD SETTINGS")
   local styles={"CIRCLE","HEX","RHOMBUS","SQUARE"}
-  local x=2
+  local cols=2
+  local spacingX,spacingY=16,6
+  local startX=4
+  local startY=4
+
+  local i=0
   for _,s in ipairs(styles) do
-    drawButton(S,"style:"..s,x,4,12,s,S.hudStyle==s)
-    x=x+14
+    local col=i%cols
+    local row=math.floor(i/cols)
+    local x=startX+col*spacingX
+    local y=startY+row*spacingY
+    drawButton(S,"style:"..s,x,y,12,s,S.hudStyle==s)
+    i=i+1
   end
-  drawButton(S,"BACK",2,10,10,"BACK",false)
+  drawButton(S,"BACK",2,14,10,"BACK",false)
 end
 
 local function drawThemes(S)
   local mon=S.mon; f.clear(mon,S.hudTheme); S.buttons={}
   f.center(mon,1,"SELECT THEME")
-  local themes={"minimalist","retro","neon","compact"}
+  local themes={"minimalist","retro","neon","compact","ascii"}
   local x=2
   for _,t in ipairs(themes) do
     drawButton(S,"theme:"..t,x,4,14,t:upper(),S.hudTheme==t)
