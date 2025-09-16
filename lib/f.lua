@@ -1,17 +1,13 @@
--- lib/f.lua — funciones auxiliares de UI
+-- lib/f.lua — helpers de UI
+local themes = require("themes")
 local f = {}
 
-f.themes = {
-  minimalist = { bg = colors.black, fg = colors.white, accent = colors.orange },
-  retro      = { bg = colors.black, fg = colors.green, accent = colors.lime },
-  neon       = { bg = colors.black, fg = colors.cyan,  accent = colors.magenta },
-  compact    = { bg = colors.gray,  fg = colors.white, accent = colors.blue },
-  ascii      = { bg = colors.black, fg = colors.white, accent = colors.lightGray },
-  hologram   = { bg = colors.black, fg = colors.cyan,  accent = colors.purple },
-}
+f.themes = themes
 
 function f.clear(mon, theme)
-  if type(mon) == "string" and theme == nil then theme, mon = mon, nil end
+  if type(mon) == "string" and theme == nil then
+    theme, mon = mon, nil
+  end
   mon = mon or term
   local t = f.themes[theme] or f.themes.minimalist
   mon.setBackgroundColor(t.bg)
