@@ -1,7 +1,51 @@
--- lib/f.lua — helpers
+-- lib/f.lua — helpers y temas de HUD
 local f = {}
 
-function f.clear(mon) mon.setBackgroundColor(colors.black); mon.clear(); mon.setCursorPos(1,1) end
+-- ===== Themes =====
+f.themes = {
+  minimalist = {
+    bg  = colors.black,
+    btn = colors.gray,
+    act = colors.orange,
+    txt = colors.white,
+  },
+  retro = {
+    bg  = colors.black,
+    btn = colors.green,
+    act = colors.lime,
+    txt = colors.green,
+  },
+  neon = {
+    bg  = colors.black,
+    btn = colors.blue,
+    act = colors.orange,
+    txt = colors.cyan,
+  },
+  compact = {
+    bg  = colors.black,
+    btn = colors.gray,
+    act = colors.lightBlue,
+    txt = colors.white,
+  },
+}
+
+-- Devuelve esquema de color según theme + si está activo
+function f.getColors(S, active)
+  local theme = f.themes[S.hudTheme or "minimalist"] or f.themes.minimalist
+  if active then
+    return theme.act, theme.txt
+  else
+    return theme.btn, theme.txt
+  end
+end
+
+-- ===== Utils =====
+function f.clear(mon)
+  local theme = f.themes["minimalist"]
+  mon.setBackgroundColor(theme.bg)
+  mon.clear()
+  mon.setCursorPos(1,1)
+end
 
 function f.center(mon,y,text)
   local w,_=mon.getSize()
@@ -21,13 +65,18 @@ end
 function f.format_int(n)
   local s=tostring(math.floor(n or 0))
   local out=""
-  while #s>3 do out=","..s:sub(-3)..out; s=s:sub(1,-4) end
+  while #s>3 do
+    out=","..string.sub(s,-3)..out
+    s=string.sub(1,-4)
+  end
   return s..out
 end
 
 function f.beep(spk,snd)
   if not spk then return end
-  pcall(function() spk.playSound(snd or "minecraft:block.note_block.pling") end)
+  pcall(function()
+    spk.playSound(snd or "minecraft:block.note_block.pling")
+  end)
 end
 
 return f
