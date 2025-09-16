@@ -1,67 +1,58 @@
--- startup.lua — controlador principal v2.0 con perutils
-
-local reactor = require("reactor")
-local ui = require("ui")
+-- reactor.lua — lógica de reactor y flux gates usando perutils
 local P = require("lib/perutils")
+local reactor = {}
 
-local S = {
-  mon = nil,
-  reactor = nil,
-  in_gate = nil,
-  out_gate = nil,
-  hudTheme = "minimalist",
-  hudStyle = "CIRCLE",
-  mode = "SAT",
-  running = true,
-}
+-- leer estado del reactor
+function reactor.read(S)
+  local ok, r = pcall(function() return S.reactor.getReactorInfo() end)
+  if not ok or not r then
+    return { sat = 0, field = 0, temp = 0, generation = 0 }
+  end
+  return {
+    sat = r.energySaturation / r.maxEnergySaturation,
+    field = r.fieldStrength / r.maxFieldStrength,
+    temp = r.temperature,
+    generation = r.generationRate,
+  }
+end
 
--- cargar config
-if fs.exists("config.lua") then
-  local ok, cfg = pcall(dofile, "config.lua")
-  if ok and type(cfg) == "table" then
-    for k,v in pairs(cfg) do S[k] = v end
+-- control automático
+function reactor.control(S, stats)
+  local mode = S.mode
+  local out = 0
+  local inFlow = 2000000
+
+  if mode == "SAT" then
+    if stats.sat > 0.82 then out = 10000000
+    elseif stats.sat < 0.78 then out = 1000000 end
+
+  elseif mode == "MAXGEN" then
+    if stats.sat > 0.55 then out = 20000000 else out = 0 end
+
+  elseif mode == "ECO" then
+    if stats.sat > 0.85 then out = 4000000 else out = 1000000 end
+
+  elseif mode == "TURBO" then
+    out = 30000000
+
+  elseif mode == "PROTECT" then
+    if stats.temp > 8000 or stats.field < 0.3 then out = 0 else out = 10000000 end
+  end
+
+  -- failsafes
+  if stats.sat < 0.5 then out = 0 end
+  if stats.field < 0.3 then inFlow = 6000000 end
+
+  -- flux gates seguros usando perutils
+  local okIn, inGate = pcall(P.get, S.in_gate or "flow_gate")
+  local okOut, outGate = pcall(P.get, S.out_gate or "flow_gate")
+
+  if okIn and inGate and inGate.setSignalLowFlow then
+    inGate.setSignalLowFlow(inFlow)
+  end
+  if okOut and outGate and outGate.setSignalLowFlow then
+    outGate.setSignalLowFlow(out)
   end
 end
 
--- periféricos usando perutils
-local function refreshPeripherals()
-  local ok
-  ok, S.reactor = pcall(P.get, S.reactor or "draconic_reactor")
-  ok, S.mon     = pcall(P.get, S.monitor or "monitor")
-  ok, S.in_gate = pcall(P.get, S.in_gate or "flow_gate")
-  ok, S.out_gate= pcall(P.get, S.out_gate or "flow_gate")
-end
-
-refreshPeripherals()
-
--- loop principal
-do
-  local function tickLoop()
-    while true do
-      if S.reactor then
-        local stats = reactor.read(S)
-        reactor.control(S, stats)
-        if S.mon then
-          ui.drawMain(S, stats)
-        else
-          term.setCursorPos(1,1)
-          print("SAT:"..math.floor(stats.sat*100).."% FLD:"..math.floor(stats.field*100).."%")
-        end
-      else
-        term.setCursorPos(1,1)
-        term.setTextColor(colors.red)
-        print("Reactor no detectado! Ejecuta setup.")
-      end
-      sleep(1)
-    end
-  end
-
-  local function uiLoop()
-    while true do
-      local e, side, x, y = os.pullEvent("monitor_touch")
-      ui.handleTouch(S, x, y)
-    end
-  end
-
-  parallel.waitForAny(tickLoop, uiLoop)
-end
+return reactor
