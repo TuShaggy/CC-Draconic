@@ -1,21 +1,17 @@
--- startup.lua — controlador principal v2.0 con perutils
+-- startup.lua — controlador principal del reactor
 
-local reactor = require("reactor")
-local ui = require("ui")
-local P = require("lib/perutils")
+local P = dofile("lib/perutils.lua")
+local f = dofile("lib/f.lua")
+local ui = dofile("ui.lua")
+local reactor = dofile("reactor.lua")
 
+-- Estado global
 local S = {
-  mon = nil,
-  reactor = nil,
-  in_gate = nil,
-  out_gate = nil,
-  hudTheme = "minimalist",
-  hudStyle = "CIRCLE",
   mode = "SAT",
-  running = true,
+  hudTheme = "minimalist",
 }
 
--- cargar config
+-- Cargar configuración si existe
 if fs.exists("config.lua") then
   local ok, cfg = pcall(dofile, "config.lua")
   if ok and type(cfg) == "table" then
@@ -23,45 +19,34 @@ if fs.exists("config.lua") then
   end
 end
 
--- periféricos usando perutils
-local function refreshPeripherals()
-  local ok
-  ok, S.reactor = pcall(P.get, S.reactor or "draconic_reactor")
-  ok, S.mon     = pcall(P.get, S.monitor or "monitor")
-  ok, S.in_gate = pcall(P.get, S.in_gate or "flow_gate")
-  ok, S.out_gate= pcall(P.get, S.out_gate or "flow_gate")
+-- Inicializar periféricos
+local function initPeripherals()
+  local ok, per = pcall(P.get, S.reactor or "draconic_reactor")
+  if ok then S.reactor = per else S.reactor = nil end
+
+  local okm, mon = pcall(P.get, S.monitor or "monitor")
+  if okm then S.mon = mon else S.mon = term end
 end
 
-refreshPeripherals()
+initPeripherals()
 
--- loop principal
-do
-  local function tickLoop()
-    while true do
-      if S.reactor then
-        local stats = reactor.read(S)
-        reactor.control(S, stats)
-        if S.mon then
-          ui.drawMain(S, stats)
-        else
-          term.setCursorPos(1,1)
-          print("SAT:"..math.floor(stats.sat*100).."% FLD:"..math.floor(stats.field*100).."%")
-        end
-      else
-        term.setCursorPos(1,1)
-        term.setTextColor(colors.red)
-        print("Reactor no detectado! Ejecuta setup.")
-      end
-      sleep(1)
+-- Loop principal
+local function tickLoop()
+  while true do
+    if S.reactor then
+      local stats = reactor.read(S)
+      reactor.control(S, stats)
+      ui.drawMain(S, stats)
+    else
+      ui.drawMain(S, {sat=0, field=0, temp=0, generation=0})
     end
+    sleep(1)
   end
-
-  local function uiLoop()
-    while true do
-      local e, side, x, y = os.pullEvent("monitor_touch")
-      ui.handleTouch(S, x, y)
-    end
-  end
-
-  parallel.waitForAny(tickLoop, uiLoop)
 end
+
+-- Dummy handler de UI por ahora
+local function uiLoop()
+  while true do sleep(0.1) end
+end
+
+parallel.waitForAny(tickLoop, uiLoop)
