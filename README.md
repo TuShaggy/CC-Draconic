@@ -12,7 +12,7 @@ setup gráfico en el monitor, botón de encendido/apagado y más modos de contro
 ## 🚀 Instalación rápida
 
 **Instalar todo con `installer.lua`:**
-```bash
+bash
 wget run https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/installer.lua
 reboot
 
