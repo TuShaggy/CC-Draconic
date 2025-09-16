@@ -1,7 +1,7 @@
 -- lib/f.lua — helpers de UI y temas
 local f = {}
 
--- 🎨 Temas
+-- 🎨 Temas (tuyos + añadidos ASCII y Hologram)
 f.themes = {
   minimalist = { bg = colors.black, fg = colors.white, accent = colors.orange },
   retro      = { bg = colors.black, fg = colors.green, accent = colors.lime },
@@ -9,16 +9,12 @@ f.themes = {
   compact    = { bg = colors.gray,  fg = colors.white, accent = colors.blue },
   ascii      = { bg = colors.black, fg = colors.white, accent = colors.lightGray },
   hologram   = { bg = colors.black, fg = colors.cyan,  accent = colors.purple },
+  -- aquí puedes añadir todos los demás que tenías (future, draconic, etc.)
 }
-
--- ✅ Helper para asegurar monitor válido
-local function getMon(mon)
-  return mon or term
-end
 
 -- 🧹 Limpia pantalla
 function f.clear(mon, theme)
-  mon = getMon(mon)
+  mon = mon or term
   local t = f.themes[theme] or f.themes.minimalist
   mon.setBackgroundColor(t.bg)
   mon.setTextColor(t.fg)
@@ -28,7 +24,7 @@ end
 
 -- 📍 Centrar texto
 function f.center(mon, y, text, theme)
-  mon = getMon(mon)
+  mon = mon or term
   local w,_ = mon.getSize()
   local t = f.themes[theme] or f.themes.minimalist
   mon.setCursorPos(math.floor((w - #text) / 2) + 1, y)
@@ -38,7 +34,7 @@ end
 
 -- 🔘 Botón estándar
 function f.button(mon, x1, y1, x2, y2, label, color, theme)
-  mon = getMon(mon)
+  mon = mon or term
   local t = f.themes[theme] or f.themes.minimalist
   mon.setBackgroundColor(color or t.accent)
   mon.setTextColor(t.fg)
@@ -53,7 +49,7 @@ end
 
 -- 🔘 Botón ASCII
 function f.asciiButton(mon, x, y, label, theme)
-  mon = getMon(mon)
+  mon = mon or term
   local t = f.themes[theme] or f.themes.ascii
   mon.setTextColor(t.accent)
   mon.setCursorPos(x, y)
@@ -66,7 +62,7 @@ end
 
 -- 🎛️ Dibujo de barra
 function f.bar(mon, x, y, w, h, value, max, color, theme)
-  mon = getMon(mon)
+  mon = mon or term
   local t = f.themes[theme] or f.themes.minimalist
   local ratio = math.min(1, math.max(0, value / max))
   local fill = math.floor(ratio * w)
@@ -84,7 +80,7 @@ end
 
 -- 🖼️ Cuadro
 function f.box(mon, x1, y1, x2, y2, color, theme)
-  mon = getMon(mon)
+  mon = mon or term
   local t = f.themes[theme] or f.themes.minimalist
   mon.setBackgroundColor(color or t.accent)
   for y = y1, y2 do
