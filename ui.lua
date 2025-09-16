@@ -2,6 +2,8 @@
 local f = dofile("lib/f.lua")
 local ui = {}
 
+ui.buttons = {}
+
 function ui.drawMain(S, stats)
   local mon = S.mon or term
   f.clear(mon, S.hudTheme)
@@ -21,11 +23,27 @@ function ui.drawMain(S, stats)
   mon.setCursorPos(2,9)
   mon.write("GEN: "..math.floor((stats.generation or 0)/1000).."kRF/t")
 
-  local btnW = math.floor(w/4) - 2
-  f.button(mon, 2,       h-3, 2+btnW,       h-2, "CTRL",   nil, S.hudTheme)
-  f.button(mon, 4+btnW,  h-3, 4+2*btnW,     h-2, "HUD",    nil, S.hudTheme)
-  f.button(mon, 6+2*btnW,h-3, 6+3*btnW,     h-2, "THEMES", nil, S.hudTheme)
-  f.button(mon, 8+3*btnW,h-3, 8+4*btnW,     h-2, "POWER",  nil, S.hudTheme)
+  -- botones dinámicos
+  ui.buttons = {
+    {x1=2,       y1=h-3, x2=8,       y2=h-2, label="CTRL",   action=function() S.mode="SAT" end},
+    {x1=10,      y1=h-3, x2=16,      y2=h-2, label="HUD",    action=function() S.hudTheme="minimalist" end},
+    {x1=18,      y1=h-3, x2=26,      y2=h-2, label="THEMES", action=function() print("themes") end},
+    {x1=28,      y1=h-3, x2=36,      y2=h-2, label="POWER",  action=function() print("power") end},
+  }
+
+  for _,b in ipairs(ui.buttons) do
+    f.button(mon, b.x1, b.y1, b.x2, b.y2, b.label, nil, S.hudTheme)
+  end
+end
+
+function ui.handleTouch(x,y)
+  for _,b in ipairs(ui.buttons) do
+    if x>=b.x1 and x<=b.x2 and y>=b.y1 and y<=b.y2 then
+      if b.action then b.action() end
+      return true
+    end
+  end
+  return false
 end
 
 return ui
