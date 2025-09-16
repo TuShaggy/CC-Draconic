@@ -105,7 +105,7 @@ local function drawButton(id,x1,y1,x2,y2,label,active)
     mon.setCursorPos(x1,y)
     if active then mon.setBackgroundColor(colors.orange); mon.setTextColor(colors.black)
     else mon.setBackgroundColor(colors.gray); mon.setTextColor(colors.white) end
-    local pad=math.max(0,(x2-x1+1-#label)//2)
+    local pad = math.max(0, math.floor((x2-x1+1-#label)/2))
     if y==(y1+y2)//2 then
       mon.write(string.rep(" ",pad)..label..string.rep(" ",(x2-x1+1-#label-pad)))
     else
