@@ -1,25 +1,52 @@
--- setup.lua — configuración interactiva
-local function ask(label)
-  term.setTextColor(colors.white)
-  write(label..": ")
-  return read()
+-- startup.lua — controlador principal del reactor
+
+local P = dofile("lib/perutils.lua")
+local f = dofile("lib/f.lua")
+local ui = dofile("ui.lua")
+local reactor = dofile("reactor.lua")
+
+-- Estado global
+local S = {
+  mode = "SAT",
+  hudTheme = "minimalist",
+}
+
+-- Cargar configuración si existe
+if fs.exists("config.lua") then
+  local ok, cfg = pcall(dofile, "config.lua")
+  if ok and type(cfg) == "table" then
+    for k,v in pairs(cfg) do S[k] = v end
+  end
 end
 
-local function runSetup()
-  term.clear()
-  term.setCursorPos(1,1)
-  print("=== SETUP DRACONIC CONTROLLER ===")
-  local cfg = {}
-  cfg.reactor = ask("Nombre del reactor")
-  cfg.monitor = ask("Nombre del monitor")
-  cfg.in_gate = ask("Flux gate de entrada")
-  cfg.out_gate = ask("Flux gate de salida")
-  cfg.hudTheme = "minimalist"
-  cfg.hudStyle = "CIRCLE"
-  local file = fs.open("config.lua", "w")
-  file.write("return "..textutils.serialize(cfg))
-  file.close()
-  print("Guardado en config.lua")
+-- Inicializar periféricos
+local function initPeripherals()
+  local ok, per = pcall(P.get, S.reactor or "draconic_reactor")
+  if ok then S.reactor = per else S.reactor = nil end
+
+  local okm, mon = pcall(P.get, S.monitor or "monitor")
+  if okm then S.mon = mon else S.mon = term end
 end
 
-runSetup()
+initPeripherals()
+
+-- Loop principal
+local function tickLoop()
+  while true do
+    if S.reactor then
+      local stats = reactor.read(S)
+      reactor.control(S, stats)
+      ui.drawMain(S, stats)
+    else
+      ui.drawMain(S, {sat=0, field=0, temp=0, generation=0})
+    end
+    sleep(1)
+  end
+end
+
+-- Dummy handler de UI por ahora
+local function uiLoop()
+  while true do sleep(0.1) end
+end
+
+parallel.waitForAny(tickLoop, uiLoop)
