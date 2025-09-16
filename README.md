@@ -1,137 +1,128 @@
-# ATM10 Draconic Reactor Controller (CC\:Tweaked)
+📜 README.md
+# ⚡ ATM10 Draconic Reactor Controller (v2.0)
 
-## 🚀 Arranque rápido con `wget`
+Controlador seguro y modular para el **Draconic Reactor** usando **CC:Tweaked**.  
+Diseñado para ATM10 (MC 1.20.x), compatible también con ATM9 y otros packs.  
 
-**CC\:Tweaked** permite descargar/ejecutar scripts desde URLs crudas ("raw"). Para este repo:
-
-**Opción 1 — Ejecutar sin guardar (descarga + run):**
-
-```bash
-wget run https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/installer.lua
-```
-
-**Opción 2 — Descargar a un archivo y ejecutarlo después:**
-
-```bash
-wget https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/installer.lua installer.lua
-lua installer.lua
-# o
-shell.run("installer.lua")
-```
-
-> Usa siempre la URL **raw** (empieza por `https://raw.githubusercontent.com/...`). La página HTML normal de GitHub NO funciona con `wget`.
-
-### ⚠️ Problemas habituales
-
-* **HTTP disabled** → En el server/instancia, edita `config/cc-tweaked-server.toml` y pon `http.enabled = true`. Reinicia.
-* **404 / Not Found** → Revisa la ruta/branch (`main`) o que el archivo exista.
-* **Unknown host** → El servidor no tiene salida a Internet o DNS bloqueado.
-* **Program not found: wget** → Versión muy antigua; alternativa: `pastebin run <ID>` con el bootstrap.
+Versión **2.0** → modular, interfaz minimalista, animación de inicio,  
+setup gráfico en el monitor, botón de encendido/apagado y más modos de control.
 
 ---
 
-Controlador seguro, modular y **sin tocar el reactor** (todo por **módem cableado**), compatible con ATM10 (MC 1.20.x). Regula **dos flux gates**: uno de **entrada** (mantener campo) y uno de **salida** (mantener saturación o alcanzar una **generación objetivo**). Incluye asistente **SETUP** en pantalla y **failsafes**.
+## 🚀 Instalación rápida
 
-## Requisitos
-
-* CC\:Tweaked
-* Draconic Evolution (reactor + 2 flux gates)
-* Monitor avanzado 3×3
-* Módems **con cable** en el reactor (stabilizer), ambos flux gates, monitor y ordenador
-
-## Instalación (3 opciones)
-
-### A) Con Pastebin (recomendado para usuarios)
-
-1. Sube `pastebin_bootstrap.lua` a Pastebin y copia su **ID**.
-2. En el ordenador de CC, ejecuta:
-
-   ```
-   pastebin run <PASTEBIN_ID>
-   ```
-
-   Esto descargará `installer.lua` desde este repo y hará la instalación.
-
-### B) Con `wget run` directamente desde GitHub
-
+**Instalar todo con `installer.lua`:**
 ```bash
 wget run https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/installer.lua
-```
+reboot
 
-### C) Manual
 
-* Copia `startup.lua` a `/startup.lua`
-* Copia `lib/f.lua` a `/lib/f.lua`
+Actualizar sin perder configuración (usa installer.lua de nuevo):
 
-## Cableado (no-touch)
+wget run https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/installer.lua
+reboot
 
-```
-[Computer]──(wired modem)──[Flux Gate IN]──> Reactor Injector
-          └─(wired modem)──[Flux Gate OUT]──> Stabilizer/Core side
-          └─(wired modem)──[Monitor 3x3]
-          └─(wired modem)──[Reactor Stabilizer]
-```
 
-> Ningún bloque necesita estar físicamente pegado al reactor; todo via módem.
+Actualizar forzando limpieza total (update.lua, borra config):
 
-## Primer arranque
+wget run https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/update.lua
+reboot
 
-* El HUD mostrará arriba **SETUP** (botón **siempre visible**). Toca SETUP para mapear reactor, monitor, y puertas **IN/OUT** si tienes >2 gates en red.
-* Con 2 gates exactos, el sistema intenta **auto-calibrar** (identificar IN/OUT con un “nudge” seguro). Si no puede, usa SETUP.
-* El mapeo se guarda en `config.lua`.
 
-## UI (HUD)
+Instalación manual (avanzado):
 
-* Arriba izq.: estado del reactor, nombres mapeados (reactor/monitor/gates)
-* Arriba der.: botones **MODE: SAT/GEN** y **SETUP**
-* Centro: generación y temperatura
-* Barras: **Energy Saturation** y **Field Strength**
-* Abajo: dos filas de botones
+Copia los ficheros del repo a / y lib/ en tu ordenador de CC.
 
-  * Fila `my-1` → **OUT** (<<< << <  OUT\:AU/MA  > >> >>>)
-  * Fila `my`   → **IN**  (<<< << <  IN\:AU/MA   > >> >>>)
+Archivos requeridos:
 
-## Modos de control de salida
+startup.lua
 
-* **SAT (por defecto):** ajusta el flux gate de salida para mantener `TARGET_SAT` (%).
-* **GEN:** ajusta salida para alcanzar `TARGET_GEN_RFPT` (RF/t).
+reactor.lua
 
-  * Cambia `TARGET_GEN_RFPT` en `startup.lua`.
-  * Usa histéresis `DB_GEN` (porcentaje alrededor del objetivo) para estabilidad.
+setup.lua
 
-## Failsafes
+ui.lua
 
-* **Campo < `FIELD_LOW_TRIP`%** → parar, pasar a **charge**, **IN=CHARGE\_FLOW**, **OUT=0**.
-* **Temp > `TEMP_MAX`** → parar y minimizar OUT.
-* **Auto-rearme** cuando temp < `TEMP_SAFE`.
+lib/f.lua
 
-## Config rápida (ejemplo)
+📂 Estructura de ficheros
+/ (root)
+ ├─ startup.lua      → Entrypoint, carga módulos
+ ├─ reactor.lua      → Lógica del reactor (encendido/apagado, info)
+ ├─ setup.lua        → Asistente gráfico para mapear periféricos
+ ├─ ui.lua           → Interfaz de usuario (HUD minimalista)
+ ├─ lib/
+ │   └─ f.lua        → Helpers (clear, beep, format, etc)
+ ├─ installer.lua    → Instala/actualiza sin borrar config
+ ├─ update.lua       → Fuerza actualización completa (incluye config.lua)
+ └─ VERSION          → Número de versión actual
 
-Crea o edita `/config.lua` si quieres fijar nombres manualmente:
+📊 Funciones principales
 
-```lua
+Animación de inicio con barra de carga y sonidos (si hay altavoz conectado).
+
+Setup gráfico → selecciona periféricos (Reactor, Monitor, Flux Gates) directamente en el monitor.
+
+HUD minimalista → estado claro y limpio del reactor: SAT, Field, Generación, Temperatura.
+
+Botón POWER → enciende o apaga el reactor desde el HUD.
+
+Pestaña CTRL → modos de operación (SAT, MAXGEN, ECO, TURBO, PROTECT).
+
+Pestaña HUD → elegir estilo visual de los botones (Circle, Hex, Rhombus, Square).
+
+Failsafe básico → si faltan periféricos, muestra advertencia en pantalla.
+
+🔧 Configuración
+
+El mapeo de periféricos se guarda en config.lua tras el Setup gráfico:
+
 return {
   reactor = "draconic_reactor_1",
   monitor = "monitor_5",
   in_gate = "flow_gate_4",
   out_gate = "flow_gate_9",
+  hud_style = "CIRCLE"
 }
-```
 
-## Troubleshooting
 
-* **No se detecta reactor/monitor/gates** → revisa módems cableados y que `http` esté habilitado en CC.
-* **El HUD no responde al tacto** → asegúrate de que es **monitor avanzado** y que tocas en la zona del botón.
-* **Oscilaciones** (flujo sube/baja mucho) → baja `IN_KP/IN_KI` o `OUT_KP/OUT_KI`, o aumenta `DB_FIELD/DB_SAT/DB_GEN`.
-* **Demasiado calor** con modo GEN → sube objetivo de saturación o baja `TARGET_GEN_RFPT`. El control recorta salida si `Temp > 7000`.
+Para resetearlo → borra config.lua y reinicia.
 
-## Créditos
+Para actualizar sin perder config → usa installer.lua.
 
-* Inspirado en el clásico `drmon` de acidjazz; esta implementación es una reescritura para 1.20.x con auto-discovery, asistente y control PI doble.
+Para resetear todo (incluido config) → usa update.lua.
 
----
+🖥️ Requisitos
 
-### Comandos útiles de CC
+CC:Tweaked
 
-* Ver periféricos: `peripherals` o `lua print(textutils.serialize(peripheral.getNames()))`
-* Reiniciar: `reboot`
+Draconic Evolution (reactor + 2 flux gates)
+
+Monitor avanzado (mínimo 3×3 recomendado)
+
+Módem cableado en todos los periféricos
+
+Opcional: Speaker para sonidos de alerta y animación
+
+🛠️ Troubleshooting
+
+No se detecta reactor/monitor/gates → revisa módems cableados.
+
+Botones no responden → asegúrate de que el monitor es avanzado y estás tocando dentro de la zona.
+
+El reactor no enciende → revisa que esté cargado (50% field y 100% saturation) antes de presionar POWER.
+
+Quiero volver a empezar → borra config.lua o usa update.lua.
+
+📑 Documentación adicional
+
+CHANGELOG.md → historial de cambios y mejoras por versión.
+
+VERSION → contiene solo el número de versión actual (ej: 2.0).
+
+📜 Créditos
+
+Inspirado en drmon de acidjazz
+.
+
+Reescrito y actualizado para ATM10 con interfaz gráfica, modularidad y mejoras.
