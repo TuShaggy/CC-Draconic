@@ -1,8 +1,4 @@
 -- ui.lua — HUD minimalista estilo drmon (barras + POWER/AU)
-term.clear()
-term.setCursorPos(1,1)
-term.redirect(old)
-end
 
 
 local function drawBox(x,y,w,h,bg)
