@@ -12,7 +12,7 @@ local files = {
 
 print("== CC-Draconic :: Actualizador ==")
 
--- Borrar todo excepto config.lua y lib/
+-- Borrar todo excepto config.lua
 for _,file in ipairs(files) do
   if fs.exists(file) then fs.delete(file) end
 end
