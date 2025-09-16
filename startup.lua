@@ -1,17 +1,12 @@
--- startup.lua — controlador principal del reactor
+-- startup.lua
 
 local P = dofile("lib/perutils.lua")
 local f = dofile("lib/f.lua")
 local ui = dofile("ui.lua")
 local reactor = dofile("reactor.lua")
 
--- Estado global
-local S = {
-  mode = "SAT",
-  hudTheme = "minimalist",
-}
+local S = { mode = "SAT", hudTheme = "minimalist" }
 
--- Cargar configuración si existe
 if fs.exists("config.lua") then
   local ok, cfg = pcall(dofile, "config.lua")
   if ok and type(cfg) == "table" then
@@ -19,18 +14,15 @@ if fs.exists("config.lua") then
   end
 end
 
--- Inicializar periféricos
 local function initPeripherals()
   local ok, per = pcall(P.get, S.reactor or "draconic_reactor")
   if ok then S.reactor = per else S.reactor = nil end
-
   local okm, mon = pcall(P.get, S.monitor or "monitor")
   if okm then S.mon = mon else S.mon = term end
 end
 
 initPeripherals()
 
--- Loop principal
 local function tickLoop()
   while true do
     if S.reactor then
@@ -44,7 +36,6 @@ local function tickLoop()
   end
 end
 
--- Dummy handler de UI por ahora
 local function uiLoop()
   while true do sleep(0.1) end
 end
