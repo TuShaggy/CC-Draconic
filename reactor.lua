@@ -1,8 +1,7 @@
--- reactor.lua — lógica de reactor y flux gates usando perutils
-local P = require("lib/perutils")
+-- reactor.lua — lógica de reactor y flux gates
+local P = dofile("lib/perutils.lua")
 local reactor = {}
 
--- leer estado del reactor
 function reactor.read(S)
   local ok, r = pcall(function() return S.reactor.getReactorInfo() end)
   if not ok or not r then
@@ -16,7 +15,6 @@ function reactor.read(S)
   }
 end
 
--- control automático
 function reactor.control(S, stats)
   local mode = S.mode
   local out = 0
@@ -39,11 +37,9 @@ function reactor.control(S, stats)
     if stats.temp > 8000 or stats.field < 0.3 then out = 0 else out = 10000000 end
   end
 
-  -- failsafes
   if stats.sat < 0.5 then out = 0 end
   if stats.field < 0.3 then inFlow = 6000000 end
 
-  -- flux gates seguros usando perutils
   local okIn, inGate = pcall(P.get, S.in_gate or "flow_gate")
   local okOut, outGate = pcall(P.get, S.out_gate or "flow_gate")
 
