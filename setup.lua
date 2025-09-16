@@ -1,6 +1,4 @@
 -- setup.lua — configuración interactiva
-local f = require("lib/f")
-
 local function ask(label)
   term.setTextColor(colors.white)
   write(label..": ")
