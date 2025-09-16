@@ -1,52 +1,40 @@
--- startup.lua — controlador principal del reactor
+-- setup.lua
 
 local P = dofile("lib/perutils.lua")
 local f = dofile("lib/f.lua")
-local ui = dofile("ui.lua")
-local reactor = dofile("reactor.lua")
 
--- Estado global
-local S = {
-  mode = "SAT",
-  hudTheme = "minimalist",
+local S = { step = 1, config = {} }
+
+local steps = {
+  { key="reactor", label="Selecciona el reactor (draconic_reactor)" },
+  { key="monitor", label="Selecciona el monitor avanzado" },
+  { key="in_gate", label="Selecciona flux gate de ENTRADA" },
+  { key="out_gate", label="Selecciona flux gate de SALIDA" },
 }
 
--- Cargar configuración si existe
-if fs.exists("config.lua") then
-  local ok, cfg = pcall(dofile, "config.lua")
-  if ok and type(cfg) == "table" then
-    for k,v in pairs(cfg) do S[k] = v end
-  end
+local function saveConfig()
+  local h = fs.open("config.lua","w")
+  h.write("return "..textutils.serialize(S.config))
+  h.close()
 end
 
--- Inicializar periféricos
-local function initPeripherals()
-  local ok, per = pcall(P.get, S.reactor or "draconic_reactor")
-  if ok then S.reactor = per else S.reactor = nil end
-
-  local okm, mon = pcall(P.get, S.monitor or "monitor")
-  if okm then S.mon = mon else S.mon = term end
-end
-
-initPeripherals()
-
--- Loop principal
-local function tickLoop()
-  while true do
-    if S.reactor then
-      local stats = reactor.read(S)
-      reactor.control(S, stats)
-      ui.drawMain(S, stats)
-    else
-      ui.drawMain(S, {sat=0, field=0, temp=0, generation=0})
+function S.run()
+  local mon = S.mon or term
+  while S.step <= #steps do
+    f.clear(mon, "minimalist")
+    f.center(mon, 1, "SETUP - Paso "..S.step, "minimalist")
+    f.center(mon, 3, steps[S.step].label, "minimalist")
+    print("Periféricos detectados:")
+    for _,p in ipairs(peripheral.getNames()) do
+      print(" - "..p)
     end
-    sleep(1)
+    write("Introduce nombre: ")
+    local name = read()
+    S.config[steps[S.step].key] = name
+    S.step = S.step + 1
   end
+  saveConfig()
+  print("✅ Configuración guardada en config.lua")
 end
 
--- Dummy handler de UI por ahora
-local function uiLoop()
-  while true do sleep(0.1) end
-end
-
-parallel.waitForAny(tickLoop, uiLoop)
+return S
