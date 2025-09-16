@@ -1,33 +1,30 @@
--- installer.lua — instala el controlador CC-Draconic
-local base = "https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/"
+-- installer.lua — instala todos los módulos desde GitHub
+local repo = "https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/"
 
 local files = {
   "startup.lua",
   "reactor.lua",
   "setup.lua",
   "ui.lua",
+  "installer.lua",
   "update.lua",
   "lib/f.lua",
 }
 
-print("== CC-Draconic :: Instalador ==")
-
--- Crear carpeta lib si no existe
-if not fs.exists("lib") then fs.makeDir("lib") end
-
 for _,file in ipairs(files) do
-  local url = base..file
-  print("Descargando "..file.." ...")
-  local ok,resp = pcall(http.get,url)
-  if ok and resp then
-    local h = fs.open(file,"w")
-    h.write(resp.readAll())
+  local url = repo..file
+  print("Descargando "..file)
+  local h = http.get(url)
+  if h then
+    local c = h.readAll()
     h.close()
-    resp.close()
-    print(" ✔ "..file)
+    fs.makeDir(fs.getDir(file))
+    local f = fs.open(file, "w")
+    f.write(c)
+    f.close()
   else
-    print(" ✖ ERROR: no se pudo bajar "..file)
+    print("Fallo al descargar "..file)
   end
 end
 
-print("Instalación completa. Reinicia con 'reboot'.")
+print("Instalación completa. Ejecuta reboot.")
