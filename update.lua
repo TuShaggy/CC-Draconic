@@ -1,32 +1,46 @@
--- update.lua — actualiza a la última versión desde GitHub
-local repo = "https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/"
+-- update.lua — actualiza todo el proyecto desde GitHub
 
-local files = {
-  "startup.lua",
-  "reactor.lua",
-  "setup.lua",
-  "ui.lua",
-  "installer.lua",
-  "update.lua",
-  "lib/f.lua",
-}
+local http = require("http")
 
-for _,file in ipairs(files) do
-  if file ~= "config.lua" then
-    print("Actualizando "..file)
-    local url = repo..file
-    local h = http.get(url)
-    if h then
-      local c = h.readAll()
-      h.close()
-      fs.makeDir(fs.getDir(file))
-      local f = fs.open(file, "w")
-      f.write(c)
-      f.close()
-    else
-      print("Fallo al actualizar "..file)
+local repo = "TuShaggy/CC-Draconic"
+local branch = "main"
+local api = ("https://api.github.com/repos/%s/contents/?ref=%s"):format(repo, branch)
+local raw = ("https://raw.githubusercontent.com/%s/%s/"):format(repo, branch)
+
+-- función recursiva para descargar todo el árbol
+local function fetchTree(path, url)
+  local res = http.get(url)
+  if not res then
+    print("⚠️ Error al acceder a "..url)
+    return
+  end
+  local data = textutils.unserializeJSON(res.readAll())
+  res.close()
+
+  for _, file in ipairs(data) do
+    if file.type == "file" then
+      local rawUrl = raw..file.path
+      print("↓ "..file.path)
+      local ok, err = pcall(function()
+        local r = http.get(rawUrl)
+        if not r then error("No se pudo descargar "..rawUrl) end
+        local content = r.readAll()
+        r.close()
+        local dir = fs.getDir(file.path)
+        if dir ~= "" and not fs.exists(dir) then fs.makeDir(dir) end
+        if file.path ~= "config.lua" then
+          local h = fs.open(file.path, "w")
+          h.write(content)
+          h.close()
+        end
+      end)
+      if not ok then print("   ⚠️ "..tostring(err)) end
+    elseif file.type == "dir" then
+      fetchTree(file.path, file.url)
     end
   end
 end
 
-print("Actualización completa. Ejecuta reboot.")
+print("🚀 Actualizando proyecto desde GitHub...")
+fetchTree("", api)
+print("✅ Actualización completada. Ejecuta `reboot`.")
