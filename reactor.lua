@@ -1,79 +1,109 @@
--- startup.lua — Loop principal + eventos (HUD estilo drmon con AU funcional)
-local F = dofile("lib/f.lua")
+-- reactor.lua — Wrapper periféricos + lógica AU (Auto)
 
 
-local cfg = nil
-if not fs.exists("config.lua") then
-print("[CC-Draconic] No hay config.lua — ejecuta setup.lua para detectar periféricos.")
+-- Normaliza campos comunes
+local maxField = info.maxFieldStrength or info.maxField or 0
+local field = info.fieldStrength or info.field or 0
+local maxSat = info.maxEnergySaturation or info.maxSaturation or 0
+local sat = info.energySaturation or info.saturation or 0
+
+
+info._fieldPct = maxField > 0 and (field / maxField) or 0
+info._satPct = maxSat > 0 and (sat / maxSat) or 0
+info._inFlow = getGateFlow(per.GI)
+info._outFlow = getGateFlow(per.GO)
+
+
+return info
+end
+
+
+function M.setInFlow(v)
+v = math.floor(F.clamp(v or 0, 0, 2_000_000_000))
+setGateFlow(per.GI, v)
+return v
+end
+
+
+function M.setOutFlow(v)
+v = math.floor(F.clamp(v or 0, 0, 2_000_000_000))
+setGateFlow(per.GO, v)
+return v
+end
+
+
+-- Activa/desactiva el reactor de forma sencilla
+function M.togglePower()
+if not per.R then return end
+local ok, info = pcall(per.R.getReactorInfo)
+if not ok or not info then return end
+
+
+local status = tostring(info.status or info.state or "")
+status = string.lower(status)
+
+
+if status == "offline" or status == "idle" or status == "stopping" then
+-- Secuencia de arranque simple
+if hasMethod(per.R, "chargeReactor") then per.R.chargeReactor() end
+if hasMethod(per.R, "activateReactor") then per.R.activateReactor() end
 else
-local ok, res = pcall(dofile, "config.lua")
-if ok then cfg = res else print("Error cargando config.lua:", res) end
+-- Apagar
+if hasMethod(per.R, "stopReactor") then per.R.stopReactor() end
+-- Bajar flujos para seguridad
+M.setInFlow(0)
+M.setOutFlow(0)
+end
 end
 
 
-if not cfg then
-print("Intentando ejecutar setup.lua...")
-if fs.exists("setup.lua") then shell.run("setup.lua") end
-local ok, res = pcall(dofile, "config.lua")
-if ok then cfg = res else error("No se pudo cargar config.lua. Configura primero.") end
-end
-
-
-local Reactor = dofile("reactor.lua")
-local UI = dofile("ui.lua")
-
-
--- Inicializa periféricos
-local ok, err = Reactor.init(cfg)
-if not ok then error(err or "No se pudo inicializar reactor/flux gates/monitor") end
-UI.init(cfg.monitor)
-
-
--- Estado del programa
-local state = {
-auto = false, -- AU (Auto)
-inFlow = 0, -- RF/t hacia el reactor (campo)
-outFlow = 0, -- RF/t desde el reactor (salida)
-lastInfo = nil,
+-- Lógica del botón AU (Auto): PID simplificado por umbrales
+-- Objetivos conservadores (parecido a drmon clásico)
+local TARGET = {
+fieldPct = 0.35, -- mantener ~35% de campo
+tempHi = 8000, -- si sube de esto, extrae más energía
+tempLo = 6500, -- si baja de esto, relaja extracción
+satMin = 0.20, -- si la saturación cae de 20%, baja extracción
 }
 
 
--- Render & control loop
-local function updateLoop()
-while true do
-local info = Reactor.getInfo()
-state.lastInfo = info
+local STEP = { inFlow = 50_000, outFlow = 100_000 }
 
 
-if state.auto and info then
-local newIn, newOut = Reactor.autotune(info, state.inFlow, state.outFlow)
-if newIn then state.inFlow = newIn end
-if newOut then state.outFlow = newOut end
+function M.autotune(info, inNow, outNow)
+if not info then return inNow, outNow end
+
+
+local fieldPct = info._fieldPct or 0
+local temp = tonumber(info.temperature or 0) or 0
+local satPct = info._satPct or 0
+
+
+-- Control del IN (campo): sube si el campo cae, baja si sobra
+if fieldPct < (TARGET.fieldPct - 0.03) then
+inNow = inNow + STEP.inFlow
+elseif fieldPct > (TARGET.fieldPct + 0.03) then
+inNow = math.max(0, inNow - STEP.inFlow)
 end
 
 
-UI.render(info, { auto = state.auto, inFlow = state.inFlow, outFlow = state.outFlow })
-sleep(0.2)
+-- Control del OUT (extracción): depende de temp y saturación
+if temp > TARGET.tempHi then
+outNow = outNow + STEP.outFlow
+elseif temp < TARGET.tempLo then
+outNow = math.max(0, outNow - STEP.outFlow)
 end
-end
-
-
--- Eventos de pantalla táctil (monitor)
-local function eventLoop()
-while true do
-local e, side, x, y = os.pullEvent()
-if e == "monitor_touch" then
-local action = UI.handleTouch(x, y)
-if action == "toggle_power" then
-Reactor.togglePower()
-elseif action == "toggle_auto" then
-state.auto = not state.auto
-end
-elseif e == "term_resize" then
-UI.refreshGeometry()
-end
-end
+if satPct < TARGET.satMin then
+outNow = math.max(0, math.floor(outNow * 0.7))
 end
 
 
-parallel.waitForAny(updateLoop, eventLoop)
+inNow = M.setInFlow(inNow)
+outNow = M.setOutFlow(outNow)
+
+
+return inNow, outNow
+end
+
+
+return M
