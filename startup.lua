@@ -1,45 +1,45 @@
--- startup.lua
-
-local P = dofile("lib/perutils.lua")
-local f = dofile("lib/f.lua")
-local ui = dofile("ui.lua")
-local reactor = dofile("reactor.lua")
+-- startup.lua — principal
+local P        = dofile("lib/perutils.lua")
+local ui       = dofile("ui.lua")
+local reactorM = dofile("reactor.lua")
 
 local S = { mode = "SAT", hudTheme = "minimalist" }
 
+-- Cargar configuración
 if fs.exists("config.lua") then
   local ok, cfg = pcall(dofile, "config.lua")
-  if ok and type(cfg) == "table" then
-    for k,v in pairs(cfg) do S[k] = v end
-  end
+  if ok and type(cfg) == "table" then for k,v in pairs(cfg) do S[k]=v end end
 end
 
+-- Periféricos
 local function initPeripherals()
-  local ok, per = pcall(P.get, S.reactor or "draconic_reactor")
-  if ok then S.reactor = per else S.reactor = nil end
-  local okm, mon = pcall(P.get, S.monitor or "monitor")
-  if okm then S.mon = mon else S.mon = term end
+  local okR, rx  = pcall(P.get, S.reactor or "draconic_reactor")
+  S.reactor = okR and rx or nil
+  local okM, mon = pcall(P.get, S.monitor or "monitor")
+  S.mon = okM and mon or term
 end
-
 initPeripherals()
 
+-- Bucle de control + HUD
 local function tickLoop()
   while true do
-    if S.reactor then
-      local stats = reactor.read(S)
-      reactor.control(S, stats)
-      ui.drawMain(S, stats)
+    local stats
+    if S.reactor and S.reactor.getReactorInfo then
+      stats = reactorM.read(S)
+      reactorM.control(S, stats)
     else
-      ui.drawMain(S, {sat=0, field=0, temp=0, generation=0})
+      stats = { sat=0, field=0, temp=0, generation=0 }
     end
-    sleep(1)
+    ui.drawMain(S, stats)
+    sleep(0.5)
   end
 end
 
+-- Eventos de toque
 local function uiLoop()
   while true do
     local e, side, x, y = os.pullEvent("monitor_touch")
-    ui.handleTouch(x,y)
+    ui.handleTouch(S, x, y)
   end
 end
 
