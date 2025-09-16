@@ -1,4 +1,4 @@
--- ui.lua — HUD estilo drmon con botones
+-- ui.lua — HUD estilo drmon con botón POWER funcional
 local f = dofile("lib/f.lua")
 local ui = {}
 ui.buttons = {}
@@ -57,12 +57,24 @@ function ui.handleTouch(S, x, y)
     if x>=b.x1 and x<=b.x2 and y>=b.y1 and y<=b.y2 then
       if b.key=="CTRL" then
         S.mode = (S.mode=="SAT") and "MAXGEN" or "SAT"
+
       elseif b.key=="HUD" then
         S.hudTheme = "minimalist"
+
       elseif b.key=="THEMES" then
         print("themes selector")
-      elseif b.key=="POWER" then
-        print("power toggle")
+
+      elseif b.key=="POWER" and S.reactor then
+        if S.reactor.getReactorInfo then
+          local info = S.reactor.getReactorInfo()
+          if info.status == "online" then
+            S.reactor.stopReactor()
+            print("⚠️ Reactor apagado")
+          else
+            S.reactor.activateReactor()
+            print("✅ Reactor encendido")
+          end
+        end
       end
       return true
     end
