@@ -1,19 +1,18 @@
--- ui.lua — minimal futuristic HUD
+-- ui.lua — HUD & UI System
 local f = require("lib/f")
 
 local ui = {}
 
--- guardar área de botones
+-- ===== Button registry =====
 local function regButton(S,id,x1,y1,x2,y2)
   S.buttons = S.buttons or {}
   S.buttons[id] = {x1=x1,y1=y1,x2=x2,y2=y2}
 end
 
--- botón rectangular minimalista
+-- ===== Draw button =====
 local function drawButton(S,id,x,y,w,label,active)
   local mon = S.mon
-  local bg = active and colors.orange or colors.gray
-  local fg = active and colors.black or colors.white
+  local bg,fg = f.getColors(S,active)
   f.box(mon,x,y,x+w-1,y+2,bg)
   mon.setTextColor(fg)
   mon.setCursorPos(x+math.floor((w-#label)/2),y+1)
@@ -22,18 +21,19 @@ local function drawButton(S,id,x,y,w,label,active)
   regButton(S,id,x,y,x+w-1,y+2)
 end
 
--- ===== VISTAS =====
+-- ===== VIEWS =====
 local function drawDash(S,info)
   local mon=S.mon; f.clear(mon); S.buttons={}
   local w,h = mon.getSize()
-  f.center(mon,1,"REACTOR DASH")
+  f.center(mon,1,"REACTOR DASH ("..(S.hudTheme or "minimalist")..")")
   mon.setCursorPos(2,3); mon.write(("SAT: %2d%%  FLD: %2d%%"):format(math.floor(info.satP or 0), math.floor(info.fieldP or 0)))
   mon.setCursorPos(2,4); mon.write(("GEN: %s RF/t  TMP: %dC"):format(f.format_int(info.gen or 0), info.temp or 0))
-  local bw = math.floor(w/3)-2
+  local bw = math.floor(w/4)-2
   drawButton(S,"CTRL",2,h-4,bw,"CTRL",S.view=="CTRL")
   drawButton(S,"HUD",bw+4,h-4,bw,"HUD",S.view=="HUD")
+  drawButton(S,"THEMES",2*bw+6,h-4,bw,"THEMES",S.view=="THEMES")
   local lbl = S.power and "POWER OFF" or "POWER ON"
-  drawButton(S,"POWER",2*bw+6,h-4,bw,lbl,S.power)
+  drawButton(S,"POWER",3*bw+8,h-4,bw,lbl,S.power)
 end
 
 local function drawCtrl(S)
@@ -60,7 +60,19 @@ local function drawHUD(S)
   drawButton(S,"BACK",2,10,10,"BACK",false)
 end
 
--- animación simple
+local function drawThemes(S)
+  local mon=S.mon; f.clear(mon); S.buttons={}
+  f.center(mon,1,"SELECT THEME")
+  local themes={"minimalist","retro","neon","compact"}
+  local x=2
+  for _,t in ipairs(themes) do
+    drawButton(S,"theme:"..t,x,4,14,t:upper(),S.hudTheme==t)
+    x=x+16
+  end
+  drawButton(S,"BACK",2,10,10,"BACK",false)
+end
+
+-- Animación simple
 local function drawBoot(S)
   local mon=S.mon; f.clear(mon)
   f.center(mon,2,"DRACONIC CONTROLLER")
@@ -85,6 +97,7 @@ function ui.run(S, reactor, setup)
       elseif S.view=="DASH" then drawDash(S,info or {})
       elseif S.view=="CTRL" then drawCtrl(S)
       elseif S.view=="HUD" then drawHUD(S)
+      elseif S.view=="THEMES" then drawThemes(S)
       elseif S.view=="SETUP" then setup.drawSetup(S) end
       sleep(0.2)
     end
@@ -98,6 +111,7 @@ function ui.run(S, reactor, setup)
           if S.view=="DASH" then
             if id=="CTRL" then S.view="CTRL"
             elseif id=="HUD" then S.view="HUD"
+            elseif id=="THEMES" then S.view="THEMES"
             elseif id=="POWER" then
               S.power=not S.power; reactor.setActive(S,S.power)
             end
@@ -112,6 +126,16 @@ function ui.run(S, reactor, setup)
                 S.hudStyle=style
                 local cfg=setup.loadConfig() or {}
                 cfg.hud_style=style; setup.saveConfig(cfg)
+              end
+            end
+          elseif S.view=="THEMES" then
+            if id=="BACK" then S.view="DASH"
+            else
+              local theme=id:match("^theme:(.+)$")
+              if theme then
+                S.hudTheme=theme
+                local cfg=setup.loadConfig() or {}
+                cfg.hud_theme=theme; setup.saveConfig(cfg)
               end
             end
           elseif S.view=="SETUP" then
