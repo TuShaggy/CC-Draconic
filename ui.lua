@@ -95,7 +95,7 @@ end
 local function drawThemes(S)
   local mon=S.mon; f.clear(mon,S.hudTheme); S.buttons={}
   f.center(mon,1,"SELECT THEME")
-  local themes={"minimalist","retro","neon","compact","ascii"}
+  local themes={"minimalist","retro","neon","compact","ascii","hologram"}
   local x=2
   for _,t in ipairs(themes) do
     drawButton(S,"theme:"..t,x,4,14,t:upper(),S.hudTheme==t)
