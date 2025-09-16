@@ -34,6 +34,13 @@ f.themes = {
     txt = colors.white,
     border = colors.lightGray,
   },
+  hologram = {
+    bg  = colors.black,
+    btn = colors.purple,
+    act = colors.magenta,
+    txt = colors.cyan,
+    border = colors.purple,
+  },
 }
 
 -- Devuelve esquema de color según theme + si está activo
