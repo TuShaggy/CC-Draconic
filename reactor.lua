@@ -1,4 +1,7 @@
 -- reactor.lua — Wrapper periféricos + lógica AU (Auto)
+if not per.R then return nil end
+local ok, info = pcall(per.R.getReactorInfo)
+if not ok or not info then return nil end
 
 
 -- Normaliza campos comunes
@@ -19,14 +22,14 @@ end
 
 
 function M.setInFlow(v)
-v = math.floor(F.clamp(v or 0, 0, 2_000_000_000))
+v = math.floor(F.clamp(v or 0, 0, 2000000000))
 setGateFlow(per.GI, v)
 return v
 end
 
 
 function M.setOutFlow(v)
-v = math.floor(F.clamp(v or 0, 0, 2_000_000_000))
+v = math.floor(F.clamp(v or 0, 0, 2000000000))
 setGateFlow(per.GO, v)
 return v
 end
@@ -67,7 +70,7 @@ satMin = 0.20, -- si la saturación cae de 20%, baja extracción
 }
 
 
-local STEP = { inFlow = 50_000, outFlow = 100_000 }
+local STEP = { inFlow = 50000, outFlow = 100000 }
 
 
 function M.autotune(info, inNow, outNow)
