@@ -1,7 +1,7 @@
 -- ATM10 Draconic Reactor Controller — Auto-update + HUD nuevo + Setup
 
 -- ===== AUTO-UPDATE =====
-local REPO = "https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/startup.lua"
+local REPO = "https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/"
 local FILES = {"startup.lua"}
 
 local function updateFromGit()
@@ -41,7 +41,11 @@ local function load_f()
     end,
     format_int = function(n)
       local s=tostring(math.floor(n))
-      local out="" while #s>3 do out=","..string.sub(s,-3)..out s=string.sub(s,1,-4) end
+      local out=""
+      while #s>3 do
+        out=","..string.sub(s,-3)..out
+        s=string.sub(s,1,-4)
+      end
       return s..out
     end
   }
@@ -154,7 +158,9 @@ local function drawCtrl(info)
   drawButton("BACK", math.floor(mx/2)-4, my-2, math.floor(mx/2)+4, my-1, "Volver", false)
 end
 
-local function draw(info) if S.view=="DASH" then drawDash(info) else drawCtrl(info) end end
+local function draw(info)
+  if S.view=="DASH" then drawDash(info) else drawCtrl(info) end
+end
 
 -- ===== LOOPS =====
 local function uiLoop()
