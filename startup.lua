@@ -1,71 +1,65 @@
--- startup.lua — ciclo principal con HUD estilo drmon y animación de arranque
-local P        = dofile("lib/perutils.lua")
-local f        = dofile("lib/f.lua")
-local ui       = dofile("ui.lua")
-local reactorM = dofile("reactor.lua")
-
-local S = { mode="SAT" }
-
--- cargar config
-if fs.exists("config.lua") then
-  local ok, cfg = pcall(dofile,"config.lua")
-  if ok and type(cfg)=="table" then for k,v in pairs(cfg) do S[k]=v end end
+-- setup.lua — Autodetección de periféricos y creación de config.lua
+local function firstOfType(ptype)
+for _, name in ipairs(peripheral.getNames()) do
+if peripheral.getType(name) == ptype then return name end
+end
 end
 
--- periféricos
-local function initPeripherals()
-  local okR, rx  = pcall(P.get, S.reactor or "draconic_reactor")
-  S.reactor = okR and rx or nil
-  local okM, mon = pcall(P.get, S.monitor or "monitor")
-  S.mon = okM and mon or term
+
+local function choose(msg, candidates)
+print(msg)
+for i, n in ipairs(candidates) do print(string.format(" [%d] %s (%s)", i, n, peripheral.getType(n))) end
+write("Selecciona número (o Enter para [1]): ")
+local s = read()
+local idx = tonumber(s) or 1
+return candidates[idx]
 end
 
--- animación de arranque
-local function startupAnim()
-  local mon = S.mon or term
-  mon.setBackgroundColor(colors.black)
-  mon.clear()
 
-  local w,h = mon.getSize()
+local names = peripheral.getNames()
+if #names == 0 then error("No hay periféricos conectados (necesitas módem cableado)") end
 
-  f.center(mon, math.floor(h/2)-1, "DRACONIC REACTOR", colors.orange)
-  f.center(mon, math.floor(h/2),    "Controller v2.0", colors.white)
 
-  for i=1,w-4 do
-    mon.setCursorPos(2, h-2)
-    mon.setBackgroundColor(colors.orange)
-    mon.write(string.rep(" ", i))
-    sleep(0.02)
-  end
-
-  mon.setBackgroundColor(colors.black)
-  mon.clear()
+local monitors, reactors, gates = {}, {}, {}
+for _, n in ipairs(names) do
+local t = peripheral.getType(n)
+if t == "monitor" then table.insert(monitors, n)
+elseif t == "draconic_reactor" or t == "reactor" or t == "draconic_reactor_core" then table.insert(reactors, n)
+elseif t == "flow_gate" or t == "flux_gate" or t == "draconic_flux_gate" then table.insert(gates, n)
+end
 end
 
--- bucle reactor + HUD
-local function tickLoop()
-  while true do
-    local stats
-    if S.reactor and S.reactor.getReactorInfo then
-      stats = reactorM.read(S)
-      reactorM.control(S, stats)
-    else
-      stats = { sat=0, field=0, temp=0, generation=0 }
-    end
-    ui.drawMain(S, stats)
-    sleep(0.5)
-  end
-end
 
--- bucle eventos de UI
-local function uiLoop()
-  while true do
-    local e, side, x, y = os.pullEvent("monitor_touch")
-    ui.handleTouch(S, x, y)
-  end
-end
+if #monitors == 0 then error("No se encontró monitor") end
+if #reactors == 0 then error("No se encontró draconic_reactor") end
+if #gates < 2 then error("Se necesitan 2 flow/flux gates (IN/OUT)") end
 
--- flujo principal
-initPeripherals()
-startupAnim()
-parallel.waitForAny(tickLoop, uiLoop)
+
+local monitor = #monitors == 1 and monitors[1] or choose("Elige monitor:", monitors)
+local reactor = #reactors == 1 and reactors[1] or choose("Elige reactor:", reactors)
+
+
+print("Elige GATE **IN** (hacia REACTOR):")
+local gateIn = choose("Gate IN:", gates)
+
+
+-- quita el elegido y usa otro para OUT
+local rest = {}
+for _, n in ipairs(gates) do if n ~= gateIn then table.insert(rest, n) end end
+local gateOut = #rest == 1 and rest[1] or choose("Gate OUT:", rest)
+
+
+local cfg = string.format([[return {
+reactor = %q,
+in_gate = %q,
+out_gate = %q,
+monitor = %q,
+}]], reactor, gateIn, gateOut, monitor)
+
+
+local fh = fs.open("config.lua", "w")
+fh.write(cfg)
+fh.close()
+
+
+print("✔ config.lua creado. Puedes ejecutar 'startup.lua'.")
