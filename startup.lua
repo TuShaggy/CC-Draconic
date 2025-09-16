@@ -37,7 +37,10 @@ local function tickLoop()
 end
 
 local function uiLoop()
-  while true do sleep(0.1) end
+  while true do
+    local e, side, x, y = os.pullEvent("monitor_touch")
+    ui.handleTouch(x,y)
+  end
 end
 
 parallel.waitForAny(tickLoop, uiLoop)
