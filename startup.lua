@@ -16,6 +16,7 @@ local S = {
   modeOut = "SAT",
   power = false,
   view = "BOOT",
+  step = 1, 
 }
 
 -- ===== MAIN =====
