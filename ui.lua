@@ -23,11 +23,28 @@ end
 
 -- ===== VIEWS =====
 local function drawDash(S,info)
-  local mon=S.mon; f.clear(mon); S.buttons={}
+  local mon=S.mon; f.clear(mon,S.hudTheme); S.buttons={}
   local w,h = mon.getSize()
   f.center(mon,1,"REACTOR DASH ("..(S.hudTheme or "minimalist")..")")
-  mon.setCursorPos(2,3); mon.write(("SAT: %2d%%  FLD: %2d%%"):format(math.floor(info.satP or 0), math.floor(info.fieldP or 0)))
-  mon.setCursorPos(2,4); mon.write(("GEN: %s RF/t  TMP: %dC"):format(f.format_int(info.gen or 0), info.temp or 0))
+
+  if S.hudTheme == "compact" then
+    -- Compact layout
+    mon.setCursorPos(2,3)
+    mon.write(("SAT %2d%% | FLD %2d%% | GEN %s | TMP %dC")
+      :format(math.floor(info.satP or 0),
+              math.floor(info.fieldP or 0),
+              f.format_int(info.gen or 0),
+              info.temp or 0))
+  else
+    -- Full layout
+    mon.setCursorPos(2,3)
+    mon.write(("SAT: %2d%%  FLD: %2d%%")
+      :format(math.floor(info.satP or 0), math.floor(info.fieldP or 0)))
+    mon.setCursorPos(2,4)
+    mon.write(("GEN: %s RF/t  TMP: %dC")
+      :format(f.format_int(info.gen or 0), info.temp or 0))
+  end
+
   local bw = math.floor(w/4)-2
   drawButton(S,"CTRL",2,h-4,bw,"CTRL",S.view=="CTRL")
   drawButton(S,"HUD",bw+4,h-4,bw,"HUD",S.view=="HUD")
@@ -37,7 +54,7 @@ local function drawDash(S,info)
 end
 
 local function drawCtrl(S)
-  local mon=S.mon; f.clear(mon); S.buttons={}
+  local mon=S.mon; f.clear(mon,S.hudTheme); S.buttons={}
   f.center(mon,1,"MODOS")
   local modes={"SAT","MAXGEN","ECO","TURBO","PROTECT"}
   local x=2
@@ -49,7 +66,7 @@ local function drawCtrl(S)
 end
 
 local function drawHUD(S)
-  local mon=S.mon; f.clear(mon); S.buttons={}
+  local mon=S.mon; f.clear(mon,S.hudTheme); S.buttons={}
   f.center(mon,1,"HUD SETTINGS")
   local styles={"CIRCLE","HEX","RHOMBUS","SQUARE"}
   local x=2
@@ -61,7 +78,7 @@ local function drawHUD(S)
 end
 
 local function drawThemes(S)
-  local mon=S.mon; f.clear(mon); S.buttons={}
+  local mon=S.mon; f.clear(mon,S.hudTheme); S.buttons={}
   f.center(mon,1,"SELECT THEME")
   local themes={"minimalist","retro","neon","compact"}
   local x=2
@@ -74,7 +91,7 @@ end
 
 -- Animación simple
 local function drawBoot(S)
-  local mon=S.mon; f.clear(mon)
+  local mon=S.mon; f.clear(mon,S.hudTheme)
   f.center(mon,2,"DRACONIC CONTROLLER")
   f.center(mon,4,"Loading...")
   local w,_=mon.getSize()
