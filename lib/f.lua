@@ -1,117 +1,97 @@
--- lib/f.lua — helpers y temas de HUD
+-- lib/f.lua — helpers de UI y temas
 local f = {}
 
--- ===== Themes =====
+-- 🎨 Temas
 f.themes = {
-  minimalist = {
-    bg  = colors.black,
-    btn = colors.gray,
-    act = colors.orange,
-    txt = colors.white,
-  },
-  retro = {
-    bg  = colors.black,
-    btn = colors.green,
-    act = colors.lime,
-    txt = colors.green,
-  },
-  neon = {
-    bg  = colors.black,
-    btn = colors.blue,
-    act = colors.orange,
-    txt = colors.cyan,
-  },
-  compact = {
-    bg  = colors.black,
-    btn = colors.gray,
-    act = colors.lightBlue,
-    txt = colors.white,
-  },
-  ascii = {
-    bg  = colors.black,
-    btn = colors.black,
-    act = colors.black,
-    txt = colors.white,
-    border = colors.lightGray,
-  },
-  hologram = {
-    bg  = colors.black,
-    btn = colors.purple,
-    act = colors.magenta,
-    txt = colors.cyan,
-    border = colors.purple,
-  },
+  minimalist = { bg = colors.black, fg = colors.white, accent = colors.orange },
+  retro      = { bg = colors.black, fg = colors.green, accent = colors.lime },
+  neon       = { bg = colors.black, fg = colors.cyan,  accent = colors.magenta },
+  compact    = { bg = colors.gray,  fg = colors.white, accent = colors.blue },
+  ascii      = { bg = colors.black, fg = colors.white, accent = colors.lightGray },
+  hologram   = { bg = colors.black, fg = colors.cyan,  accent = colors.purple },
 }
 
--- Devuelve esquema de color según theme + si está activo
-function f.getColors(S, active)
-  local theme = f.themes[S.hudTheme or "minimalist"] or f.themes.minimalist
-  if active then
-    return theme.act,theme.txt
-  else
-    return theme.btn,theme.txt
-  end
+-- ✅ Helper para asegurar monitor válido
+local function getMon(mon)
+  return mon or term
 end
 
--- ===== Utils =====
-function f.clear(mon, themeName)
-  local theme = f.themes[themeName or "minimalist"]
-  mon.setBackgroundColor(theme.bg)
+-- 🧹 Limpia pantalla
+function f.clear(mon, theme)
+  mon = getMon(mon)
+  local t = f.themes[theme] or f.themes.minimalist
+  mon.setBackgroundColor(t.bg)
+  mon.setTextColor(t.fg)
   mon.clear()
   mon.setCursorPos(1,1)
 end
 
-function f.center(mon,y,text)
-  local w,_=mon.getSize()
-  mon.setCursorPos(math.floor(w/2-#text/2),y)
+-- 📍 Centrar texto
+function f.center(mon, y, text, theme)
+  mon = getMon(mon)
+  local w,_ = mon.getSize()
+  local t = f.themes[theme] or f.themes.minimalist
+  mon.setCursorPos(math.floor((w - #text) / 2) + 1, y)
+  mon.setTextColor(t.fg)
   mon.write(text)
 end
 
-function f.box(mon,x1,y1,x2,y2,bg)
-  mon.setBackgroundColor(bg or colors.gray)
-  for y=y1,y2 do
-    mon.setCursorPos(x1,y)
-    mon.write(string.rep(" ",x2-x1+1))
+-- 🔘 Botón estándar
+function f.button(mon, x1, y1, x2, y2, label, color, theme)
+  mon = getMon(mon)
+  local t = f.themes[theme] or f.themes.minimalist
+  mon.setBackgroundColor(color or t.accent)
+  mon.setTextColor(t.fg)
+  for y = y1, y2 do
+    mon.setCursorPos(x1, y)
+    mon.write(string.rep(" ", x2 - x1 + 1))
   end
-  mon.setBackgroundColor(colors.black)
+  mon.setCursorPos(x1 + math.floor((x2 - x1 - #label) / 2), y1 + math.floor((y2 - y1) / 2))
+  mon.write(label)
+  mon.setBackgroundColor(t.bg)
 end
 
-function f.format_int(n)
-  local s=tostring(math.floor(n or 0))
-  local out=""
-  while #s>3 do
-    out=","..string.sub(s,-3)..out
-    s=string.sub(s,1,-4)
-  end
-  return s..out
+-- 🔘 Botón ASCII
+function f.asciiButton(mon, x, y, label, theme)
+  mon = getMon(mon)
+  local t = f.themes[theme] or f.themes.ascii
+  mon.setTextColor(t.accent)
+  mon.setCursorPos(x, y)
+  mon.write("+" .. string.rep("-", #label + 2) .. "+")
+  mon.setCursorPos(x, y+1)
+  mon.write("| " .. label .. " |")
+  mon.setCursorPos(x, y+2)
+  mon.write("+" .. string.rep("-", #label + 2) .. "+")
 end
 
-function f.beep(spk,snd)
-  if not spk then return end
-  pcall(function()
-    spk.playSound(snd or "minecraft:block.note_block.pling")
-  end)
-end
-
--- ===== ASCII Button =====
-function f.drawAsciiButton(mon,x,y,w,h,label,active)
-  mon.setTextColor(colors.white)
-  mon.setBackgroundColor(colors.black)
-
-  -- Top border
-  mon.setCursorPos(x,y); mon.write("+"..string.rep("-",w-2).."+")
-  -- Middle
-  for j=1,h-2 do
-    mon.setCursorPos(x,y+j)
-    local pad = math.floor((w-#label)/2)
-    local line = "|" .. string.rep(" ",w-2) .. "|"
-    if j==math.floor(h/2) then
-      line = "|" .. string.rep(" ",pad)..label..string.rep(" ",w-2-#label-pad).."|"
+-- 🎛️ Dibujo de barra
+function f.bar(mon, x, y, w, h, value, max, color, theme)
+  mon = getMon(mon)
+  local t = f.themes[theme] or f.themes.minimalist
+  local ratio = math.min(1, math.max(0, value / max))
+  local fill = math.floor(ratio * w)
+  mon.setBackgroundColor(color or t.accent)
+  for i = 0, h-1 do
+    mon.setCursorPos(x, y+i)
+    mon.write(string.rep(" ", fill))
+    if fill < w then
+      mon.setBackgroundColor(t.bg)
+      mon.write(string.rep(" ", w - fill))
     end
-    mon.write(line)
   end
-  -- Bottom border
-  mon.setCursorPos(x,y+h-1); mon.write("+"..string.rep("-",w-2).."+")
+  mon.setBackgroundColor(t.bg)
+end
+
+-- 🖼️ Cuadro
+function f.box(mon, x1, y1, x2, y2, color, theme)
+  mon = getMon(mon)
+  local t = f.themes[theme] or f.themes.minimalist
+  mon.setBackgroundColor(color or t.accent)
+  for y = y1, y2 do
+    mon.setCursorPos(x1, y)
+    mon.write(string.rep(" ", x2 - x1 + 1))
+  end
+  mon.setBackgroundColor(t.bg)
 end
 
 return f
