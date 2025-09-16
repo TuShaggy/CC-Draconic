@@ -1,54 +1,79 @@
--- reactor.lua
-local P = dofile("lib/perutils.lua")
-local reactor = {}
+-- startup.lua — Loop principal + eventos (HUD estilo drmon con AU funcional)
+local F = dofile("lib/f.lua")
 
-function reactor.read(S)
-  local ok, r = pcall(function() return S.reactor.getReactorInfo() end)
-  if not ok or not r then
-    return { sat = 0, field = 0, temp = 0, generation = 0 }
-  end
-  return {
-    sat = r.energySaturation / r.maxEnergySaturation,
-    field = r.fieldStrength / r.maxFieldStrength,
-    temp = r.temperature,
-    generation = r.generationRate,
-  }
+
+local cfg = nil
+if not fs.exists("config.lua") then
+print("[CC-Draconic] No hay config.lua — ejecuta setup.lua para detectar periféricos.")
+else
+local ok, res = pcall(dofile, "config.lua")
+if ok then cfg = res else print("Error cargando config.lua:", res) end
 end
 
-function reactor.control(S, stats)
-  local mode = S.mode
-  local out = 0
-  local inFlow = 2000000
 
-  if mode == "SAT" then
-    if stats.sat > 0.82 then out = 10000000
-    elseif stats.sat < 0.78 then out = 1000000 end
-
-  elseif mode == "MAXGEN" then
-    if stats.sat > 0.55 then out = 20000000 else out = 0 end
-
-  elseif mode == "ECO" then
-    if stats.sat > 0.85 then out = 4000000 else out = 1000000 end
-
-  elseif mode == "TURBO" then
-    out = 30000000
-
-  elseif mode == "PROTECT" then
-    if stats.temp > 8000 or stats.field < 0.3 then out = 0 else out = 10000000 end
-  end
-
-  if stats.sat < 0.5 then out = 0 end
-  if stats.field < 0.3 then inFlow = 6000000 end
-
-  local okIn, inGate = pcall(P.get, S.in_gate or "flow_gate")
-  local okOut, outGate = pcall(P.get, S.out_gate or "flow_gate")
-
-  if okIn and inGate and inGate.setSignalLowFlow then
-    inGate.setSignalLowFlow(inFlow)
-  end
-  if okOut and outGate and outGate.setSignalLowFlow then
-    outGate.setSignalLowFlow(out)
-  end
+if not cfg then
+print("Intentando ejecutar setup.lua...")
+if fs.exists("setup.lua") then shell.run("setup.lua") end
+local ok, res = pcall(dofile, "config.lua")
+if ok then cfg = res else error("No se pudo cargar config.lua. Configura primero.") end
 end
 
-return reactor
+
+local Reactor = dofile("reactor.lua")
+local UI = dofile("ui.lua")
+
+
+-- Inicializa periféricos
+local ok, err = Reactor.init(cfg)
+if not ok then error(err or "No se pudo inicializar reactor/flux gates/monitor") end
+UI.init(cfg.monitor)
+
+
+-- Estado del programa
+local state = {
+auto = false, -- AU (Auto)
+inFlow = 0, -- RF/t hacia el reactor (campo)
+outFlow = 0, -- RF/t desde el reactor (salida)
+lastInfo = nil,
+}
+
+
+-- Render & control loop
+local function updateLoop()
+while true do
+local info = Reactor.getInfo()
+state.lastInfo = info
+
+
+if state.auto and info then
+local newIn, newOut = Reactor.autotune(info, state.inFlow, state.outFlow)
+if newIn then state.inFlow = newIn end
+if newOut then state.outFlow = newOut end
+end
+
+
+UI.render(info, { auto = state.auto, inFlow = state.inFlow, outFlow = state.outFlow })
+sleep(0.2)
+end
+end
+
+
+-- Eventos de pantalla táctil (monitor)
+local function eventLoop()
+while true do
+local e, side, x, y = os.pullEvent()
+if e == "monitor_touch" then
+local action = UI.handleTouch(x, y)
+if action == "toggle_power" then
+Reactor.togglePower()
+elseif action == "toggle_auto" then
+state.auto = not state.auto
+end
+elseif e == "term_resize" then
+UI.refreshGeometry()
+end
+end
+end
+
+
+parallel.waitForAny(updateLoop, eventLoop)
