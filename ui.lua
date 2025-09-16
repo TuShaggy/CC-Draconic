@@ -1,9 +1,4 @@
 -- ui.lua — HUD minimalista estilo drmon (barras + POWER/AU)
-
-
-local function drawBox(x,y,w,h,bg)
-local old = term.redirect(toMon())
-term.setBackgroundColor(bg or colors.gray)
 for yy = y, y+h-1 do
 term.setCursorPos(x, yy)
 term.write(string.rep(" ", w))
@@ -75,7 +70,7 @@ drawBar("Temp", tPct, colors.red, 3)
 
 
 -- Output: normalizamos visualmente a 50M RF/t (ajústalo si sueles ir más alto)
-local outPct = math.min(1, (outNow or 0) / 50_000_000)
+local outPct = math.min(1, (outNow or 0) / 50000000)
 drawBar("Output", outPct, colors.lime, 4)
 
 
