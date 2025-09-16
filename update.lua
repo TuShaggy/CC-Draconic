@@ -1,6 +1,4 @@
--- update.lua — full reset + update from GitHub
--- Borra todo (incluido config.lua) y reinstala desde el repo
-
+-- update.lua — actualiza controlador CC-Draconic
 local base = "https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/"
 
 local files = {
@@ -8,33 +6,32 @@ local files = {
   "reactor.lua",
   "setup.lua",
   "ui.lua",
+  "update.lua",
   "lib/f.lua",
-  "installer.lua",
 }
 
-print("Eliminando versiones anteriores...")
+print("== CC-Draconic :: Actualizador ==")
 
--- Borra raíz
-local roots = { "startup.lua","reactor.lua","setup.lua","ui.lua","installer.lua","config.lua" }
-for _,f in ipairs(roots) do if fs.exists(f) then fs.delete(f) end end
+-- Borrar todo excepto config.lua y lib/
+for _,file in ipairs(files) do
+  if fs.exists(file) then fs.delete(file) end
+end
+if not fs.exists("lib") then fs.makeDir("lib") end
 
--- Borra lib
-if fs.exists("lib") then fs.delete("lib") end
-fs.makeDir("lib")
-
+-- Descargar de nuevo
 for _,file in ipairs(files) do
   local url = base..file
-  print("Descargando "..file.." ...")
-  local h = http.get(url)
-  if h then
-    local out = fs.open(file,"w")
-    out.write(h.readAll())
-    out.close()
+  print("Actualizando "..file.." ...")
+  local ok,resp = pcall(http.get,url)
+  if ok and resp then
+    local h = fs.open(file,"w")
+    h.write(resp.readAll())
     h.close()
-    print("OK -> "..file)
+    resp.close()
+    print(" ✔ "..file)
   else
-    print("ERROR al bajar "..file)
+    print(" ✖ ERROR: no se pudo bajar "..file)
   end
 end
 
-print("✅ Actualización completa. Escribe 'reboot' para reiniciar y pasar por Setup de nuevo.")
+print("Actualización completa. Reinicia con 'reboot'.")
