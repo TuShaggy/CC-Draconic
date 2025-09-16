@@ -1,4 +1,4 @@
--- lib/f.lua — funciones de UI (no usa require aquí)
+-- lib/f.lua — funciones de UI
 
 local f = {}
 
@@ -16,12 +16,12 @@ function f.center(mon, y, text, theme)
   mon.write(text)
 end
 
--- dibujar barra
+-- dibujar barra (usamos "#" en vez de "█" para evitar símbolos raros)
 function f.bar(mon, x, y, w, h, val, max, col, theme)
   val = math.min(val, max)
   local filled = math.floor((val / max) * w)
   mon.setCursorPos(x, y)
-  mon.write(string.rep("█", filled))
+  mon.write(string.rep("#", filled))
   mon.write(string.rep(" ", w - filled))
 end
 
