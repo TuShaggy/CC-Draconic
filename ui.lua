@@ -1,68 +1,68 @@
--- ui.lua — HUD principal
+-- ui.lua — HUD estilo drmon con botones
 local f = dofile("lib/f.lua")
 local ui = {}
-
 ui.buttons = {}
 
-local function layoutButtons(mon, theme)
+local function layoutButtons(mon)
   local w,h = mon.getSize()
-  local pad = 2
-  local lanes = 4
-  local laneW = math.floor((w - (pad*(lanes+1))) / lanes)
-  local y1, y2 = h-3, h-2
-
-  local labels = { "CTRL", "HUD", "THEMES", "POWER" }
+  local labels = {"CTRL","HUD","THEMES","POWER"}
   ui.buttons = {}
-  for i=1,lanes do
-    local x1 = pad + (i-1)*(laneW + pad)
-    local x2 = x1 + laneW - 1
-    table.insert(ui.buttons, {x1=x1,y1=y1,x2=x2,y2=y2,label=labels[i],key=labels[i]})
+  local laneW = math.floor(w / #labels)
+  local y1, y2 = h-2, h-1
+
+  for i,l in ipairs(labels) do
+    local x1 = (i-1)*laneW + 2
+    local x2 = i*laneW - 2
+    table.insert(ui.buttons, {x1=x1,y1=y1,x2=x2,y2=y2,label=l,key=l})
   end
 end
 
 function ui.drawMain(S, stats)
   local mon = S.mon or term
-  f.clear(mon, S.hudTheme)
-  f.center(mon, 1, "DRACONIC REACTOR", S.hudTheme)
+  mon.setBackgroundColor(colors.black)
+  mon.clear()
 
-  local w,h = mon.getSize()
+  f.center(mon, 1, "DRACONIC REACTOR", colors.white)
+
+  local w,_ = mon.getSize()
 
   -- SAT
   mon.setCursorPos(2,3)
-  mon.write("SAT: "..math.floor((stats.sat or 0)*100).."%")
-  f.hbar(mon, 8,3, w-10, 1, (stats.sat or 0)*100, 100, colors.orange, nil, S.hudTheme)
+  mon.setTextColor(colors.white)
+  mon.write(("SAT: %3d%%"):format(math.floor((stats.sat or 0)*100)))
+  f.hbar(mon, 12, 3, w-14, (stats.sat or 0)*100, 100, colors.orange, colors.gray)
 
   -- FIELD
   mon.setCursorPos(2,5)
-  mon.write("FLD: "..math.floor((stats.field or 0)*100).."%")
-  f.hbar(mon, 8,5, w-10, 1, (stats.field or 0)*100, 100, colors.cyan, nil, S.hudTheme)
+  mon.write(("FLD: %3d%%"):format(math.floor((stats.field or 0)*100)))
+  f.hbar(mon, 12, 5, w-14, (stats.field or 0)*100, 100, colors.cyan, colors.gray)
 
-  -- TEMP y GEN
+  -- TEMP
   mon.setCursorPos(2,7)
   mon.write(("TMP: %dC"):format(math.floor(stats.temp or 0)))
+
+  -- GEN
   mon.setCursorPos(2,9)
   mon.write(("GEN: %dkRF/t"):format(math.floor((stats.generation or 0)/1000)))
 
-  -- Botones
-  layoutButtons(mon, S.hudTheme)
+  -- botones
+  layoutButtons(mon)
   for _,b in ipairs(ui.buttons) do
-    f.button(mon, b.x1, b.y1, b.x2, b.y2, b.label, S.hudTheme)
+    f.button(mon, b.x1, b.y1, b.x2, b.y2, b.label, colors.orange, colors.white)
   end
 end
 
--- Manejo de toques (pásame S, x, y desde startup)
 function ui.handleTouch(S, x, y)
-  if not ui.buttons then return end
   for _,b in ipairs(ui.buttons) do
     if x>=b.x1 and x<=b.x2 and y>=b.y1 and y<=b.y2 then
-      if b.key == "CTRL" then
-        S.mode = (S.mode == "SAT") and "MAXGEN" or "SAT"
-      elseif b.key == "HUD" then
-        S.hudTheme = (S.hudTheme == "minimalist") and "retro" or "minimalist"
-      elseif b.key == "THEMES" then
-        -- Aquí podríamos abrir un selector avanzado de temas
-      elseif b.key == "POWER" then
-        -- Aquí podrías encender/apagar reactor
+      if b.key=="CTRL" then
+        S.mode = (S.mode=="SAT") and "MAXGEN" or "SAT"
+      elseif b.key=="HUD" then
+        S.hudTheme = "minimalist"
+      elseif b.key=="THEMES" then
+        print("themes selector")
+      elseif b.key=="POWER" then
+        print("power toggle")
       end
       return true
     end
