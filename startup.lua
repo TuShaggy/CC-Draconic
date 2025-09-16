@@ -1,37 +1,60 @@
--- startup.lua — entrypoint
+-- startup.lua — controlador principal v2.0
+
 local reactor = require("reactor")
-local ui      = require("ui")
-local setup   = require("setup")
+local ui = require("ui")
+local f = require("lib/f")
 
 local S = {
-  reactor   = nil,
-  monitor   = nil,
-  in_gate   = nil,
-  out_gate  = nil,
-  spk       = nil,
-  hudStyle  = "CIRCLE",
-  hudTheme  = "minimalist",
-  modeOut   = "SAT",
-  power     = false,
-  view      = "BOOT",
-  step      = 1,
-  per       = {}
+  mon = nil,
+  reactor = nil,
+  in_gate = nil,
+  out_gate = nil,
+  hudTheme = "minimalist",
+  hudStyle = "CIRCLE",
+  mode = "SAT",
+  running = true,
 }
 
--- Cargar config guardada si existe
-local function loadConfig()
-  if fs.exists("config.lua") then
-    local ok,cfg = pcall(dofile,"config.lua")
-    if ok and cfg then
-      for k,v in pairs(cfg) do S[k]=v end
-    end
+-- cargar config
+local ok, cfg = pcall(dofile, "config.lua")
+if ok and type(cfg) == "table" then
+  for k,v in pairs(cfg) do S[k] = v end
+end
+
+-- periféricos
+local function wrap(name)
+  if name and peripheral.isPresent(name) then
+    return peripheral.wrap(name)
   end
 end
 
-loadConfig()
+S.reactor = wrap(S.reactor)
+S.mon = wrap(S.monitor)
+S.in_gate = wrap(S.in_gate)
+S.out_gate = wrap(S.out_gate)
 
--- Arranque en paralelo: UI + reactor control
-parallel.waitForAny(
-  function() ui.run(S, reactor, setup) end,
-  function() reactor.controlLoop(S) end
-)
+-- loop principal
+local function tickLoop()
+  while true do
+    if S.reactor then
+      local stats = reactor.read(S)
+      reactor.control(S, stats)
+      ui.drawMain(S, stats)
+    else
+      term.setCursorPos(1,1)
+      term.setTextColor(colors.red)
+      print("Reactor no detectado! Ejecuta setup.")
+    end
+    sleep(1)
+  end
+end
+
+-- UI loop (eventos)
+local function uiLoop()
+  while true do
+    local e, side, x, y = os.pullEvent("monitor_touch")
+    ui.handleTouch(S, x, y)
+  end
+end
+
+parallel.waitForAny(tickLoop, uiLoop)
