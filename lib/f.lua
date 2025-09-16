@@ -1,36 +1,9 @@
--- lib/f.lua — utilidades varias (compat ampliada)
--- Mantiene compatibilidad con tu repo anterior: helpers de pantalla, formato y sonido.
-local F = {}
-
-
--- Matemáticas básicas
-function F.clamp(v, a, b)
-if v < a then return a end
-if v > b then return b end
-return v
-end
-function F.round(n, p)
-local m = 10 ^ (p or 0)
-return math.floor(n * m + 0.5) / m
-end
-function F.lerp(a,b,t) return a + (b-a) * t end
-
-
--- Archivos / periféricos
-function F.exists(path)
-return fs.exists(path)
-end
-function F.safeWrap(name)
-if not name then return nil end
-local ok, p = pcall(peripheral.wrap, name)
-if ok then return p end
-return nil
-end
-function F.hasMethod(p, m)
-if not p or not peripheral.getName then return false end
+-- lib/f.lua — utilidades varias (compat ampliada, corregida)
 local ok, list = pcall(peripheral.getMethods, peripheral.getName(p))
 if not ok or not list then return false end
-for _, mm in ipairs(list) do if mm == m then return true end end
+for _, mm in ipairs(list) do
+if mm == m then return true end
+end
 return false
 end
 
@@ -42,7 +15,10 @@ local out, c = "", 0
 for i = #s, 1, -1 do
 out = s:sub(i,i) .. out
 c = c + 1
-if c == 3 and i > 1 then out = "," .. out; c = 0 end
+if c == 3 and i > 1 then
+out = "," .. out
+c = 0
+end
 end
 if n < 0 then out = "-" .. out end
 return out
@@ -52,10 +28,10 @@ end
 function F.formatNum(n)
 if n == nil then return "0" end
 local abs = math.abs(n)
-if abs >= 1e12 then return F.round(n/1e12,2).."T" end
-if abs >= 1e9 then return F.round(n/1e9,2).."G" end
-if abs >= 1e6 then return F.round(n/1e6,2).."M" end
-if abs >= 1e3 then return F.round(n/1e3,2).."k" end
+if abs >= 1000000000000 then return F.round(n/1000000000000,2).."T" end
+if abs >= 1000000000 then return F.round(n/1000000000,2).."G" end
+if abs >= 1000000 then return F.round(n/1000000,2).."M" end
+if abs >= 1000 then return F.round(n/1000,2).."k" end
 return _fmtInt(n)
 end
 function F.formatRF(n)
@@ -99,4 +75,25 @@ term.setBackgroundColor(bg or colors.gray)
 for yy = y, y+h-1 do
 term.setCursorPos(x, yy)
 term.write(string.rep(" ", w))
+end
+restore()
+end
+function F.drawProgress(mon, x,y,w,h, pct, fg, bg)
+pct = F.clamp(pct or 0, 0, 1)
+F.drawBox(mon, x,y,w,h, bg or colors.gray)
+local fill = math.floor(w * pct)
+if fill > 0 then F.drawBox(mon, x, y, fill, h, fg or colors.lime) end
+end
+
+
+-- Sonido
+function F.beep(spk, freq, dur)
+if type(spk) == 'string' then spk = F.safeWrap(spk) end
+if not spk or not F.hasMethod(spk, 'playNote') then return end
+local note = 12 -- nota media
+local vol = 1
+pcall(spk.playNote, 'bell', vol, note)
+end
+
+
 return F
