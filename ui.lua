@@ -64,22 +64,17 @@ function ui.handleTouch(S, x, y)
       elseif b.key=="THEMES" then
         print("themes selector")
 
-      elseif b.key=="POWER" and S.reactor then
-        if S.reactor.getReactorInfo then
-          local info = S.reactor.getReactorInfo()
-          if info.status == "online" then
-            S.reactor.stopReactor()
-            print("⚠️ Reactor apagado")
-          else
-            S.reactor.activateReactor()
-            print("✅ Reactor encendido")
-          end
-        end
-      end
-      return true
+    elseif b.key=="POWER" then
+  if S.reactor and type(S.reactor.getReactorInfo)=="function" then
+    local info = S.reactor.getReactorInfo()
+    if info and info.status == "online" then
+      S.reactor.stopReactor()
+      print("⚠️ Reactor apagado")
+    else
+      S.reactor.activateReactor()
+      print("✅ Reactor encendido")
     end
+  else
+    print("❌ No reactor peripheral linked")
   end
-  return false
 end
-
-return ui
