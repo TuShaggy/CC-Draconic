@@ -1,5 +1,5 @@
--- update.lua — fuerza actualización desde GitHub
--- Borra startup.lua, módulos y lib/, luego reinstala todo
+-- update.lua — full reset + update from GitHub
+-- Borra todo (incluido config.lua) y reinstala desde el repo
 
 local base = "https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/"
 
@@ -9,14 +9,16 @@ local files = {
   "setup.lua",
   "ui.lua",
   "lib/f.lua",
-  "installer.lua", -- opcional, para que también se actualice el instalador
+  "installer.lua",
 }
 
 print("Eliminando versiones anteriores...")
-if fs.exists("startup.lua") then fs.delete("startup.lua") end
-if fs.exists("reactor.lua") then fs.delete("reactor.lua") end
-if fs.exists("setup.lua") then fs.delete("setup.lua") end
-if fs.exists("ui.lua") then fs.delete("ui.lua") end
+
+-- Borra raíz
+local roots = { "startup.lua","reactor.lua","setup.lua","ui.lua","installer.lua","config.lua" }
+for _,f in ipairs(roots) do if fs.exists(f) then fs.delete(f) end end
+
+-- Borra lib
 if fs.exists("lib") then fs.delete("lib") end
 fs.makeDir("lib")
 
@@ -35,4 +37,4 @@ for _,file in ipairs(files) do
   end
 end
 
-print("Actualización completa. Escribe 'reboot' para reiniciar.")
+print("✅ Actualización completa. Escribe 'reboot' para reiniciar y pasar por Setup de nuevo.")
