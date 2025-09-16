@@ -1,26 +1,5 @@
--- ATM10 Draconic Reactor Controller — Auto-update + HUD nuevo + Setup
-
--- ===== AUTO-UPDATE =====
-local REPO = "https://raw.githubusercontent.com/TuShaggy/CC-Draconic/main/"
-local FILES = {"startup.lua"}
-
-local function updateFromGit()
-  for _,file in ipairs(FILES) do
-    local url = REPO..file
-    local h = http.get(url)
-    if h then
-      local f = fs.open(file,"w")
-      f.write(h.readAll())
-      f.close()
-      h.close()
-      print("Actualizado "..file.." desde GitHub.")
-    else
-      print("No se pudo actualizar "..file.." (sin internet?)")
-    end
-  end
-end
-
-updateFromGit()
+-- ATM10 Draconic Reactor Controller — HUD nuevo + Setup
+-- Esta versión NO se borra sola, se actualiza solo con installer.lua
 
 -- ===== HELPERS =====
 local function load_f()
