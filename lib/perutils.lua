@@ -1,5 +1,4 @@
--- lib/perutils.lua
--- Utilidad para envolver periféricos de forma segura
+-- lib/perutils.lua — Utilidad para envolver periféricos de forma segura
 
 local P = { cache = {} }
 
