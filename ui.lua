@@ -1,4 +1,4 @@
--- ui.lua — interfaz de usuario
+-- ui.lua
 local f = dofile("lib/f.lua")
 local ui = {}
 
